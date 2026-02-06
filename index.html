@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#16a34a">
+    <meta name="description" content="Track your trees with photos, planting dates, and condition monitoring">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Tree Tracker">
+    
+    <title>Tree Tracker</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        #root {
+            min-height: 100vh;
+        }
+
+        .install-prompt {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #16a34a;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .install-prompt.show {
+            display: flex;
+        }
+
+        .install-prompt button {
+            background: white;
+            color: #16a34a;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .install-prompt .close {
+            background: transparent;
+            color: white;
+            padding: 4px 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <div id="installPrompt" class="install-prompt">
+        <span>📱 Install Tree Tracker for offline access!</span>
+        <button id="installBtn">Install</button>
+        <button class="close" id="closeInstall">✕</button>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // LocalStorage wrapper for PWA
+        const storage = {
+            get: async (key) => {
+                try {
+                    const value = localStorage.getItem(key);
+                    return value ? { key, value, shared: false } : null;
+                } catch (error) {
+                    console.error('Storage get error:', error);
+                    return null;
+                }
+            },
+            set: async (key, value) => {
+                try {
+                    localStorage.setItem(key, value);
+                    return { key, value, shared: false };
+                } catch (error) {
+                    console.error('Storage set error:', error);
+                    return null;
+                }
+            },
+            delete: async (key) => {
+                try {
+                    localStorage.removeItem(key);
+                    return { key, deleted: true, shared: false };
+                } catch (error) {
+                    console.error('Storage delete error:', error);
+                    return null;
+                }
+            },
+            list: async (prefix) => {
+                try {
+                    const keys = Object.keys(localStorage).filter(k => !prefix || k.startsWith(prefix));
+                    return { keys, prefix, shared: false };
+                } catch (error) {
+                    console.error('Storage list error:', error);
+                    return null;
+                }
+            }
+        };
+
+        // Make storage available globally
+        window.storage = storage;
+
+        function TreeTrackerApp() {
+            const [trees, setTrees] = useState([]);
+            const [showForm, setShowForm] = useState(false);
+            const [editingId, setEditingId] = useState(null);
+            const [showImport, setShowImport] = useState(false);
+            const [newConditionNote, setNewConditionNote] = useState('');
+            const [formData, setFormData] = useState({
+                name: '',
+                species: '',
+                plotName: '',
+                treeNumber: '',
+                plantDate: '',
+                condition: 'healthy',
+                photo: '',
+                notes: '',
+                conditionNotes: []
+            });
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                loadTrees();
+            }, []);
+
+            const loadTrees = async () => {
+                try {
+                    const result = await storage.get('tree-database');
+                    if (result && result.value) {
+                        setTrees(JSON.parse(result.value));
+                    }
+                } catch (error) {
+                    console.log('No existing trees found, starting fresh');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const saveTrees = async (updatedTrees) => {
+                try {
+                    await storage.set('tree-database', JSON.stringify(updatedTrees));
+                } catch (error) {
+                    console.error('Error saving trees:', error);
+                    alert('Failed to save tree data');
+                }
+            };
+
+            const handlePhotoUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setFormData({ ...formData, photo: reader.result });
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const addConditionNote = () => {
+                if (!newConditionNote.trim()) return;
+                
+                const noteEntry = {
+                    note: newConditionNote,
+                    date: new Date().toISOString(),
+                    condition: formData.condition
+                };
+                
+                setFormData({
+                    ...formData,
+                    conditionNotes: [...(formData.conditionNotes || []), noteEntry]
+                });
+                setNewConditionNote('');
+            };
+
+            const deleteConditionNote = (index) => {
+                const updatedNotes = formData.conditionNotes.filter((_, i) => i !== index);
+                setFormData({ ...formData, conditionNotes: updatedNotes });
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                
+                const newTree = {
+                    id: editingId || Date.now().toString(),
+                    ...formData,
+                    lastUpdated: new Date().toISOString()
+                };
+
+                let updatedTrees;
+                if (editingId) {
+                    updatedTrees = trees.map(tree => tree.id === editingId ? newTree : tree);
+                } else {
+                    updatedTrees = [...trees, newTree];
+                }
+
+                setTrees(updatedTrees);
+                await saveTrees(updatedTrees);
+                
+                setFormData({
+                    name: '',
+                    species: '',
+                    plotName: '',
+                    treeNumber: '',
+                    plantDate: '',
+                    condition: 'healthy',
+                    photo: '',
+                    notes: '',
+                    conditionNotes: []
+                });
+                setNewConditionNote('');
+                setShowForm(false);
+                setEditingId(null);
+            };
+
+            const handleEdit = (tree) => {
+                setFormData({
+                    name: tree.name,
+                    species: tree.species,
+                    plotName: tree.plotName || '',
+                    treeNumber: tree.treeNumber || '',
+                    plantDate: tree.plantDate,
+                    condition: tree.condition,
+                    photo: tree.photo,
+                    notes: tree.notes || '',
+                    conditionNotes: tree.conditionNotes || []
+                });
+                setEditingId(tree.id);
+                setShowForm(true);
+            };
+
+            const handleDelete = async (id) => {
+                if (confirm('Are you sure you want to delete this tree record?')) {
+                    const updatedTrees = trees.filter(tree => tree.id !== id);
+                    setTrees(updatedTrees);
+                    await saveTrees(updatedTrees);
+                }
+            };
+
+            const downloadTemplate = () => {
+                const template = `Tree Name,Species,Plot Name,Tree Number,Plant Date,Condition,Notes
+Oak Tree,Red Oak,North Garden,001,2024-01-15,healthy,Strong and healthy
+Maple Tree,Sugar Maple,South Plot,002,2024-02-20,needs-care,Needs watering
+Pine Tree,White Pine,East Field,003,2023-12-10,healthy,Growing well`;
+                
+                const blob = new Blob([template], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'tree_template.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            };
+
+            const exportData = () => {
+                const dataStr = JSON.stringify(trees, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tree-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            };
+
+            const handleBulkImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+                        
+                        const dataLines = lines.slice(1);
+                        
+                        const importedTrees = dataLines.map((line, index) => {
+                            const values = line.split(',').map(v => v.trim());
+                            return {
+                                id: Date.now().toString() + index,
+                                name: values[0] || '',
+                                species: values[1] || '',
+                                plotName: values[2] || '',
+                                treeNumber: values[3] || '',
+                                plantDate: values[4] || '',
+                                condition: values[5] || 'healthy',
+                                photo: '',
+                                notes: values[6] || '',
+                                conditionNotes: [],
+                                lastUpdated: new Date().toISOString()
+                            };
+                        }).filter(tree => tree.name && tree.species);
+
+                        if (importedTrees.length === 0) {
+                            alert('No valid tree data found in CSV file');
+                            return;
+                        }
+
+                        const updatedTrees = [...trees, ...importedTrees];
+                        setTrees(updatedTrees);
+                        await saveTrees(updatedTrees);
+                        
+                        alert(`Successfully imported ${importedTrees.length} trees!`);
+                        setShowImport(false);
+                    } catch (error) {
+                        console.error('Import error:', error);
+                        alert('Error importing CSV file. Please check the format.');
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            const getConditionColor = (condition) => {
+                switch (condition) {
+                    case 'healthy': return 'bg-green-100 text-green-800 border-green-300';
+                    case 'needs-care': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                    case 'diseased': return 'bg-orange-100 text-orange-800 border-orange-300';
+                    case 'dead': return 'bg-red-100 text-red-800 border-red-300';
+                    default: return 'bg-gray-100 text-gray-800 border-gray-300';
+                }
+            };
+
+            const calculateAge = (plantDate) => {
+                if (!plantDate) return 'Unknown';
+                const planted = new Date(plantDate);
+                const now = new Date();
+                const diffTime = Math.abs(now - planted);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays < 30) return `${diffDays} days`;
+                if (diffDays < 365) return `${Math.floor(diffDays / 30)} months`;
+                return `${Math.floor(diffDays / 365)} years`;
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
+                        <div className="text-green-700 text-xl">Loading trees...</div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4 md:p-8">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex items-center justify-between flex-wrap gap-4">
+                                <div className="flex items-center gap-3">
+                                    <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                                    </svg>
+                                    <h1 className="text-3xl font-bold text-gray-800">Tree Tracker</h1>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    <button
+                                        onClick={exportData}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                                    >
+                                        💾 Export Data
+                                    </button>
+                                    <button
+                                        onClick={downloadTemplate}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                                    >
+                                        📄 Template
+                                    </button>
+                                    <button
+                                        onClick={() => setShowImport(!showImport)}
+                                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                                    >
+                                        📥 Import
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowForm(!showForm);
+                                            setEditingId(null);
+                                            setFormData({
+                                                name: '',
+                                                species: '',
+                                                plotName: '',
+                                                treeNumber: '',
+                                                plantDate: '',
+                                                condition: 'healthy',
+                                                photo: '',
+                                                notes: '',
+                                                conditionNotes: []
+                                            });
+                                            setNewConditionNote('');
+                                        }}
+                                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm"
+                                    >
+                                        ➕ Add Tree
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-gray-600 mt-2">Total trees: {trees.length}</p>
+                        </div>
+
+                        {showImport && (
+                            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">Bulk Import Trees</h2>
+                                <div className="space-y-4">
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                        <h3 className="font-semibold text-blue-900 mb-2">Instructions:</h3>
+                                        <ol className="list-decimal list-inside space-y-1 text-sm text-blue-800">
+                                            <li>Download the CSV template</li>
+                                            <li>Fill in your tree data</li>
+                                            <li>Save as CSV format</li>
+                                            <li>Upload below</li>
+                                        </ol>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Upload CSV File
+                                        </label>
+                                        <input
+                                            type="file"
+                                            accept=".csv"
+                                            onChange={handleBulkImport}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                        />
+                                    </div>
+
+                                    <button
+                                        onClick={() => setShowImport(false)}
+                                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {showForm && (
+                            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">
+                                    {editingId ? 'Edit Tree' : 'Add New Tree'}
+                                </h2>
+                                <form onSubmit={handleSubmit} className="space-y-4">
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Tree Name *</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={formData.name}
+                                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                placeholder="e.g., Oak in Backyard"
+                                            />
+                                        </div>
+                                        
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Species *</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={formData.species}
+                                                onChange={(e) => setFormData({ ...formData, species: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                placeholder="e.g., Red Oak"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Plot Name *</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={formData.plotName}
+                                                onChange={(e) => setFormData({ ...formData, plotName: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                placeholder="e.g., North Garden"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Tree Number *</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={formData.treeNumber}
+                                                onChange={(e) => setFormData({ ...formData, treeNumber: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                                placeholder="e.g., 001"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Plant Date *</label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={formData.plantDate}
+                                                onChange={(e) => setFormData({ ...formData, plantDate: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Condition *</label>
+                                            <select
+                                                value={formData.condition}
+                                                onChange={(e) => setFormData({ ...formData, condition: e.target.value })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                            >
+                                                <option value="healthy">Healthy</option>
+                                                <option value="needs-care">Needs Care</option>
+                                                <option value="diseased">Diseased</option>
+                                                <option value="dead">Dead</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Photo</label>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handlePhotoUpload}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                        />
+                                        {formData.photo && (
+                                            <img src={formData.photo} alt="Preview" className="mt-2 h-32 rounded-lg object-cover" />
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">General Notes</label>
+                                        <textarea
+                                            value={formData.notes}
+                                            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                            rows="3"
+                                            placeholder="Additional observations..."
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Condition History</label>
+                                        
+                                        {formData.conditionNotes && formData.conditionNotes.length > 0 && (
+                                            <div className="mb-3 space-y-2 max-h-40 overflow-y-auto">
+                                                {formData.conditionNotes.map((entry, index) => (
+                                                    <div key={index} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex justify-between items-start">
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${getConditionColor(entry.condition)}`}>
+                                                                    {entry.condition.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                                                </span>
+                                                                <span className="text-xs text-gray-500">
+                                                                    {new Date(entry.date).toLocaleDateString()} {new Date(entry.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-sm text-gray-700">{entry.note}</p>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => deleteConditionNote(index)}
+                                                            className="text-red-500 hover:text-red-700 ml-2"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={newConditionNote}
+                                                onChange={(e) => setNewConditionNote(e.target.value)}
+                                                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addConditionNote())}
+                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                                                placeholder="Add condition note (will be saved with current date & condition)"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={addConditionNote}
+                                                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg"
+                                            >
+                                                ➕ Add
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="submit"
+                                            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg"
+                                        >
+                                            {editingId ? 'Update Tree' : 'Save Tree'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowForm(false);
+                                                setEditingId(null);
+                                            }}
+                                            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+
+                        {trees.length === 0 ? (
+                            <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+                                <div className="text-6xl mb-4">🌳</div>
+                                <h3 className="text-xl font-semibold text-gray-600 mb-2">No trees yet</h3>
+                                <p className="text-gray-500">Add your first tree to start tracking!</p>
+                            </div>
+                        ) : (
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {trees.map((tree) => (
+                                    <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
+                                        {tree.photo && (
+                                            <div className="h-48 overflow-hidden bg-gray-100">
+                                                <img src={tree.photo} alt={tree.name} className="w-full h-full object-cover" />
+                                            </div>
+                                        )}
+                                        
+                                        <div className="p-4">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                        <h3 className="text-lg font-bold text-gray-800">{tree.name}</h3>
+                                                        <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">
+                                                            #{tree.treeNumber}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button
+                                                        onClick={() => handleEdit(tree)}
+                                                        className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                                                    >
+                                                        ✏️
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(tree.id)}
+                                                        className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2 mb-3">
+                                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                    📍 <span className="font-medium">{tree.plotName}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                    📅 <span>Planted: {new Date(tree.plantDate).toLocaleDateString()}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                    🌱 <span>Age: {calculateAge(tree.plantDate)}</span>
+                                                </div>
+                                            </div>
+
+                                            <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium border ${getConditionColor(tree.condition)}`}>
+                                                {tree.condition.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                            </div>
+
+                                            {tree.conditionNotes && tree.conditionNotes.length > 0 && (
+                                                <div className="mt-3 pt-3 border-t border-gray-200">
+                                                    <p className="text-xs font-semibold text-gray-600 mb-2">Latest Note:</p>
+                                                    <div className="text-xs text-gray-700 bg-gray-50 p-2 rounded">
+                                                        <p className="font-medium">{tree.conditionNotes[tree.conditionNotes.length - 1].note}</p>
+                                                        <p className="text-gray-500 mt-1">
+                                                            {new Date(tree.conditionNotes[tree.conditionNotes.length - 1].date).toLocaleDateString()}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {tree.notes && (
+                                                <p className="mt-3 text-sm text-gray-600 line-clamp-2">{tree.notes}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<TreeTrackerApp />, document.getElementById('root'));
+    </script>
+
+    <script>
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('Service Worker registered'))
+                    .catch(err => console.log('Service Worker registration failed:', err));
+            });
+        }
+
+        // Install Prompt
+        let deferredPrompt;
+        const installPrompt = document.getElementById('installPrompt');
+        const installBtn = document.getElementById('installBtn');
+        const closeInstall = document.getElementById('closeInstall');
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installPrompt.classList.add('show');
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+                installPrompt.classList.remove('show');
+            }
+        });
+
+        closeInstall.addEventListener('click', () => {
+            installPrompt.classList.remove('show');
+        });
+    </script>
+</body>
+</html>
