@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#6B7F39">
+    <meta name="theme-color" content="#16a34a">
     <meta name="description" content="Track your trees with photos, planting dates, and condition monitoring">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -282,13 +282,6 @@
             const [currentView, setCurrentView] = useState('trees'); // 'trees' or 'plots'
             const [treeViewMode, setTreeViewMode] = useState('grid'); // 'grid', 'list', 'table', 'compact'
             const [selectedPlot, setSelectedPlot] = useState(null); // For filtering trees by plot
-            const [filters, setFilters] = useState({
-                condition: 'all',
-                size: 'all',
-                searchText: '',
-                sortBy: 'name' // 'name', 'date', 'age', 'number'
-            });
-            const [showFilters, setShowFilters] = useState(false);
             const [showForm, setShowForm] = useState(false);
             const [showPlotForm, setShowPlotForm] = useState(false);
             const [editingId, setEditingId] = useState(null);
@@ -656,69 +649,10 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
             };
 
             const getFilteredTrees = () => {
-                let filtered = trees;
-                
-                // Filter by selected plot
                 if (selectedPlot) {
-                    filtered = filtered.filter(tree => tree.plotName === selectedPlot);
+                    return trees.filter(tree => tree.plotName === selectedPlot);
                 }
-                
-                // Filter by condition
-                if (filters.condition !== 'all') {
-                    filtered = filtered.filter(tree => tree.condition === filters.condition);
-                }
-                
-                // Filter by size
-                if (filters.size !== 'all') {
-                    filtered = filtered.filter(tree => tree.size === filters.size);
-                }
-                
-                // Filter by search text
-                if (filters.searchText.trim()) {
-                    const search = filters.searchText.toLowerCase();
-                    filtered = filtered.filter(tree => 
-                        tree.name.toLowerCase().includes(search) ||
-                        tree.species.toLowerCase().includes(search) ||
-                        tree.plotName.toLowerCase().includes(search) ||
-                        tree.treeNumber.toLowerCase().includes(search) ||
-                        (tree.notes && tree.notes.toLowerCase().includes(search))
-                    );
-                }
-                
-                // Sort trees
-                filtered.sort((a, b) => {
-                    switch (filters.sortBy) {
-                        case 'name':
-                            return a.name.localeCompare(b.name);
-                        case 'date':
-                            return new Date(a.plantDate) - new Date(b.plantDate);
-                        case 'age':
-                            return new Date(b.plantDate) - new Date(a.plantDate); // Oldest first
-                        case 'number':
-                            return a.treeNumber.localeCompare(b.treeNumber);
-                        default:
-                            return 0;
-                    }
-                });
-                
-                return filtered;
-            };
-
-            const clearAllFilters = () => {
-                setFilters({
-                    condition: 'all',
-                    size: 'all',
-                    searchText: '',
-                    sortBy: 'name'
-                });
-                setSelectedPlot(null);
-            };
-
-            const hasActiveFilters = () => {
-                return filters.condition !== 'all' || 
-                       filters.size !== 'all' || 
-                       filters.searchText.trim() !== '' || 
-                       selectedPlot !== null;
+                return trees;
             };
 
             const getTreeCountByPlot = (plotName) => {
@@ -765,17 +699,8 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                                 </div>
                             </div>
                             <p className="text-gray-600 mt-2">
-                                {currentView === 'trees' ? (
-                                    <>
-                                        {hasActiveFilters() 
-                                            ? `Showing ${getFilteredTrees().length} of ${trees.length} trees`
-                                            : `Total trees: ${trees.length}`
-                                        }
-                                        {selectedPlot && ` (Plot: ${selectedPlot})`}
-                                    </>
-                                ) : (
-                                    `Total plots: ${plots.length}`
-                                )}
+                                {currentView === 'trees' ? `Total trees: ${getFilteredTrees().length}` : `Total plots: ${plots.length}`}
+                                {selectedPlot && ` (Plot: ${selectedPlot})`}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
                                 Storage: {storage.db ? '✅ IndexedDB' : '⚠️ localStorage'}
@@ -891,139 +816,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                                 </div>
                             </div>
                         ) : (
-
-                        {/* Filters Panel */}
-                        {currentView === 'trees' && (
-                            <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                <div className="flex items-center justify-between mb-3">
-                                    <button
-                                        onClick={() => setShowFilters(!showFilters)}
-                                        className="flex items-center gap-2 text-gray-700 hover:text-gray-900 font-semibold"
-                                    >
-                                        🔍 Filters & Search
-                                        <span className="text-sm">{showFilters ? '▼' : '▶'}</span>
-                                        {hasActiveFilters() && (
-                                            <span className="bg-green-600 text-white text-xs px-2 py-1 rounded-full">Active</span>
-                                        )}
-                                    </button>
-                                    {hasActiveFilters() && (
-                                        <button
-                                            onClick={clearAllFilters}
-                                            className="text-sm text-red-600 hover:text-red-800"
-                                        >
-                                            ✕ Clear All
-                                        </button>
-                                    )}
-                                </div>
-
-                                {showFilters && (
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t">
-                                        {/* Search */}
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Search Trees
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={filters.searchText}
-                                                onChange={(e) => setFilters({...filters, searchText: e.target.value})}
-                                                placeholder="Name, species, plot..."
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                            />
-                                        </div>
-
-                                        {/* Condition Filter */}
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Condition
-                                            </label>
-                                            <select
-                                                value={filters.condition}
-                                                onChange={(e) => setFilters({...filters, condition: e.target.value})}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                            >
-                                                <option value="all">All Conditions</option>
-                                                <option value="healthy">Healthy</option>
-                                                <option value="needs-care">Needs Care</option>
-                                                <option value="diseased">Diseased</option>
-                                                <option value="dead">Dead</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Size Filter */}
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Size
-                                            </label>
-                                            <select
-                                                value={filters.size}
-                                                onChange={(e) => setFilters({...filters, size: e.target.value})}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                            >
-                                                <option value="all">All Sizes</option>
-                                                <option value="very-small">Very Small</option>
-                                                <option value="small">Small</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="large">Large</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Sort By */}
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Sort By
-                                            </label>
-                                            <select
-                                                value={filters.sortBy}
-                                                onChange={(e) => setFilters({...filters, sortBy: e.target.value})}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                            >
-                                                <option value="name">Name (A-Z)</option>
-                                                <option value="number">Tree Number</option>
-                                                <option value="date">Plant Date (Oldest)</option>
-                                                <option value="age">Plant Date (Newest)</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Active Filters Summary */}
-                                {hasActiveFilters() && (
-                                    <div className="mt-3 pt-3 border-t">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className="text-sm font-medium text-gray-600">Active:</span>
-                                            {selectedPlot && (
-                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                                                    Plot: {selectedPlot}
-                                                    <button onClick={() => setSelectedPlot(null)} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {filters.condition !== 'all' && (
-                                                <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                                                    {filters.condition}
-                                                    <button onClick={() => setFilters({...filters, condition: 'all'})} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {filters.size !== 'all' && (
-                                                <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full">
-                                                    {filters.size}
-                                                    <button onClick={() => setFilters({...filters, size: 'all'})} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {filters.searchText.trim() && (
-                                                <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
-                                                    Search: "{filters.searchText}"
-                                                    <button onClick={() => setFilters({...filters, searchText: ''})} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Action Buttons for Plots */}
-                        {currentView === 'plots' ? (
                             <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
                                 <button
                                     onClick={() => setShowPlotForm(!showPlotForm)}
