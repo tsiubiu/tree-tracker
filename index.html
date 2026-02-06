@@ -280,6 +280,7 @@
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
             const [currentView, setCurrentView] = useState('trees'); // 'trees' or 'plots'
+            const [treeViewMode, setTreeViewMode] = useState('grid'); // 'grid', 'list', 'table', 'compact'
             const [selectedPlot, setSelectedPlot] = useState(null); // For filtering trees by plot
             const [showForm, setShowForm] = useState(false);
             const [showPlotForm, setShowPlotForm] = useState(false);
@@ -729,39 +730,89 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                         {/* Action Buttons */}
                         {currentView === 'trees' ? (
                             <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                <div className="flex gap-2 flex-wrap">
-                                    {selectedPlot && (
+                                <div className="flex justify-between items-center flex-wrap gap-4">
+                                    <div className="flex gap-2 flex-wrap">
+                                        {selectedPlot && (
+                                            <button
+                                                onClick={() => setSelectedPlot(null)}
+                                                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm"
+                                            >
+                                                ← All Trees
+                                            </button>
+                                        )}
                                         <button
-                                            onClick={() => setSelectedPlot(null)}
-                                            className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm"
+                                            onClick={exportData}
+                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                                         >
-                                            ← All Trees
+                                            💾 Export
                                         </button>
-                                    )}
-                                    <button
-                                        onClick={exportData}
-                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                                    >
-                                        💾 Export
-                                    </button>
-                                    <button
-                                        onClick={downloadTemplate}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
-                                    >
-                                        📄 Template
-                                    </button>
-                                    <button
-                                        onClick={() => setShowImport(!showImport)}
-                                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm"
-                                    >
-                                        📥 Import
-                                    </button>
-                                    <button
-                                        onClick={() => setShowForm(!showForm)}
-                                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm"
-                                    >
-                                        ➕ Add Tree
-                                    </button>
+                                        <button
+                                            onClick={downloadTemplate}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+                                        >
+                                            📄 Template
+                                        </button>
+                                        <button
+                                            onClick={() => setShowImport(!showImport)}
+                                            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm"
+                                        >
+                                            📥 Import
+                                        </button>
+                                        <button
+                                            onClick={() => setShowForm(!showForm)}
+                                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm"
+                                        >
+                                            ➕ Add Tree
+                                        </button>
+                                    </div>
+
+                                    {/* View Mode Selector */}
+                                    <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                                        <button
+                                            onClick={() => setTreeViewMode('grid')}
+                                            className={`px-3 py-2 rounded transition-all ${
+                                                treeViewMode === 'grid' 
+                                                    ? 'bg-white shadow text-green-600 font-semibold' 
+                                                    : 'text-gray-600 hover:text-gray-800'
+                                            }`}
+                                            title="Grid View"
+                                        >
+                                            ⊞
+                                        </button>
+                                        <button
+                                            onClick={() => setTreeViewMode('list')}
+                                            className={`px-3 py-2 rounded transition-all ${
+                                                treeViewMode === 'list' 
+                                                    ? 'bg-white shadow text-green-600 font-semibold' 
+                                                    : 'text-gray-600 hover:text-gray-800'
+                                            }`}
+                                            title="List View"
+                                        >
+                                            ≡
+                                        </button>
+                                        <button
+                                            onClick={() => setTreeViewMode('table')}
+                                            className={`px-3 py-2 rounded transition-all ${
+                                                treeViewMode === 'table' 
+                                                    ? 'bg-white shadow text-green-600 font-semibold' 
+                                                    : 'text-gray-600 hover:text-gray-800'
+                                            }`}
+                                            title="Table View"
+                                        >
+                                            ☰
+                                        </button>
+                                        <button
+                                            onClick={() => setTreeViewMode('compact')}
+                                            className={`px-3 py-2 rounded transition-all ${
+                                                treeViewMode === 'compact' 
+                                                    ? 'bg-white shadow text-green-600 font-semibold' 
+                                                    : 'text-gray-600 hover:text-gray-800'
+                                            }`}
+                                            title="Compact View"
+                                        >
+                                            ▦
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ) : (
@@ -1086,78 +1137,191 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                                     <p className="text-gray-500">Add your first tree to start tracking!</p>
                                 </div>
                             ) : (
-                                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    {getFilteredTrees().map((tree) => (
-                                        <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
-                                            {tree.photo && (
-                                                <div className="h-48 overflow-hidden bg-gray-100">
-                                                    <img src={tree.photo} alt={tree.name} className="w-full h-full object-cover" />
+                                <>
+                                    {/* Grid View */}
+                                    {treeViewMode === 'grid' && (
+                                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {getFilteredTrees().map((tree) => (
+                                                <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
+                                                    {tree.photo && (
+                                                        <div className="h-48 overflow-hidden bg-gray-100">
+                                                            <img src={tree.photo} alt={tree.name} className="w-full h-full object-cover" />
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="p-4">
+                                                        <div className="flex items-start justify-between mb-2">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                    <h3 className="text-lg font-bold text-gray-800">{tree.name}</h3>
+                                                                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                                                                        #{tree.treeNumber}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                                            </div>
+                                                            <div className="flex gap-1">
+                                                                <button onClick={() => handleEdit(tree)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">✏️</button>
+                                                                <button onClick={() => handleDelete(tree.id)} className="p-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-2 mb-3">
+                                                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                                📍 <span className="font-medium">{tree.plotName}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-sm">
+                                                                <span className={`text-xs px-2 py-1 rounded font-semibold ${getSizeColor(tree.size)}`}>
+                                                                    {tree.size?.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Medium'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                                📅 {new Date(tree.plantDate).toLocaleDateString()}
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                                🌱 Age: {calculateAge(tree.plantDate)}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium border ${getConditionColor(tree.condition)}`}>
+                                                            {tree.condition.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                                                        </div>
+
+                                                        {tree.conditionNotes && tree.conditionNotes.length > 0 && (
+                                                            <div className="mt-3 pt-3 border-t">
+                                                                <p className="text-xs font-semibold text-gray-600 mb-2">Latest:</p>
+                                                                <div className="text-xs bg-gray-50 p-2 rounded">
+                                                                    <p className="font-medium">{tree.conditionNotes[tree.conditionNotes.length - 1].note}</p>
+                                                                    <p className="text-gray-500 mt-1">
+                                                                        {new Date(tree.conditionNotes[tree.conditionNotes.length - 1].date).toLocaleDateString()}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            )}
-                                            
-                                            <div className="p-4">
-                                                <div className="flex items-start justify-between mb-2">
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* List View */}
+                                    {treeViewMode === 'list' && (
+                                        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+                                            {getFilteredTrees().map((tree, index) => (
+                                                <div key={tree.id} className={`p-4 flex items-center justify-between hover:bg-gray-50 ${index !== 0 ? 'border-t border-gray-200' : ''}`}>
                                                     <div className="flex-1">
-                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                        <div className="flex items-center gap-3 mb-1">
                                                             <h3 className="text-lg font-bold text-gray-800">{tree.name}</h3>
-                                                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                                                                #{tree.treeNumber}
+                                                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span>
+                                                            <span className={`text-xs px-2 py-1 rounded font-semibold ${getSizeColor(tree.size)}`}>
+                                                                {tree.size?.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Medium'}
+                                                            </span>
+                                                            <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>
+                                                                {tree.condition.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                                                             </span>
                                                         </div>
-                                                        <p className="text-sm text-gray-600 italic">{tree.species}</p>
-                                                    </div>
-                                                    <div className="flex gap-1">
-                                                        <button
-                                                            onClick={() => handleEdit(tree)}
-                                                            className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                                        >
-                                                            ✏️
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDelete(tree.id)}
-                                                            className="p-1 text-red-600 hover:bg-red-50 rounded"
-                                                        >
-                                                            🗑️
-                                                        </button>
-                                                    </div>
-                                                </div>
-
-                                                <div className="space-y-2 mb-3">
-                                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                                        📍 <span className="font-medium">{tree.plotName}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-sm">
-                                                        <span className={`text-xs px-2 py-1 rounded font-semibold ${getSizeColor(tree.size)}`}>
-                                                            {tree.size?.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Medium'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                                        📅 {new Date(tree.plantDate).toLocaleDateString()}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                                        🌱 Age: {calculateAge(tree.plantDate)}
-                                                    </div>
-                                                </div>
-
-                                                <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium border ${getConditionColor(tree.condition)}`}>
-                                                    {tree.condition.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                                                </div>
-
-                                                {tree.conditionNotes && tree.conditionNotes.length > 0 && (
-                                                    <div className="mt-3 pt-3 border-t">
-                                                        <p className="text-xs font-semibold text-gray-600 mb-2">Latest:</p>
-                                                        <div className="text-xs bg-gray-50 p-2 rounded">
-                                                            <p className="font-medium">{tree.conditionNotes[tree.conditionNotes.length - 1].note}</p>
-                                                            <p className="text-gray-500 mt-1">
-                                                                {new Date(tree.conditionNotes[tree.conditionNotes.length - 1].date).toLocaleDateString()}
-                                                            </p>
+                                                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                                                            <span className="italic">{tree.species}</span>
+                                                            <span>📍 {tree.plotName}</span>
+                                                            <span>📅 {new Date(tree.plantDate).toLocaleDateString()}</span>
+                                                            <span>🌱 {calculateAge(tree.plantDate)}</span>
                                                         </div>
                                                     </div>
-                                                )}
-                                            </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleEdit(tree)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded">✏️ Edit</button>
+                                                        <button onClick={() => handleDelete(tree.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
+                                    )}
+
+                                    {/* Table View */}
+                                    {treeViewMode === 'table' && (
+                                        <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead className="bg-green-600 text-white">
+                                                    <tr>
+                                                        <th className="px-4 py-3 text-left">Tree #</th>
+                                                        <th className="px-4 py-3 text-left">Name</th>
+                                                        <th className="px-4 py-3 text-left">Species</th>
+                                                        <th className="px-4 py-3 text-left">Plot</th>
+                                                        <th className="px-4 py-3 text-left">Size</th>
+                                                        <th className="px-4 py-3 text-left">Planted</th>
+                                                        <th className="px-4 py-3 text-left">Age</th>
+                                                        <th className="px-4 py-3 text-left">Condition</th>
+                                                        <th className="px-4 py-3 text-left">Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {getFilteredTrees().map((tree, index) => (
+                                                        <tr key={tree.id} className={`${index % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-green-50`}>
+                                                            <td className="px-4 py-3">
+                                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">
+                                                                    #{tree.treeNumber}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 font-semibold">{tree.name}</td>
+                                                            <td className="px-4 py-3 text-gray-600 italic">{tree.species}</td>
+                                                            <td className="px-4 py-3 text-gray-600">{tree.plotName}</td>
+                                                            <td className="px-4 py-3">
+                                                                <span className={`text-xs px-2 py-1 rounded ${getSizeColor(tree.size)}`}>
+                                                                    {tree.size?.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || 'Medium'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-sm text-gray-600">{new Date(tree.plantDate).toLocaleDateString()}</td>
+                                                            <td className="px-4 py-3 text-sm text-gray-600">{calculateAge(tree.plantDate)}</td>
+                                                            <td className="px-4 py-3">
+                                                                <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>
+                                                                    {tree.condition.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex gap-2">
+                                                                    <button onClick={() => handleEdit(tree)} className="text-blue-600 hover:text-blue-800">✏️</button>
+                                                                    <button onClick={() => handleDelete(tree.id)} className="text-red-600 hover:text-red-800">🗑️</button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+
+                                    {/* Compact View */}
+                                    {treeViewMode === 'compact' && (
+                                        <div className="grid md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                            {getFilteredTrees().map((tree) => (
+                                                <div key={tree.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-3 border border-gray-200">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <h4 className="font-bold text-sm text-gray-800 truncate">{tree.name}</h4>
+                                                            <p className="text-xs text-gray-500 truncate">{tree.species}</p>
+                                                        </div>
+                                                        <div className="flex gap-1 ml-2">
+                                                            <button onClick={() => handleEdit(tree)} className="text-blue-600 text-xs">✏️</button>
+                                                            <button onClick={() => handleDelete(tree.id)} className="text-red-600 text-xs">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-semibold">#{tree.treeNumber}</span>
+                                                            <span className={`text-xs px-2 py-0.5 rounded ${getSizeColor(tree.size)}`}>
+                                                                {tree.size?.charAt(0).toUpperCase() || 'M'}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-600">📍 {tree.plotName}</p>
+                                                        <p className="text-xs text-gray-500">{calculateAge(tree.plantDate)}</p>
+                                                        <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>
+                                                            {tree.condition === 'healthy' ? '✓' : tree.condition === 'needs-care' ? '!' : tree.condition === 'diseased' ? '⚠' : '✕'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
                             )
                         )}
 
