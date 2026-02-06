@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tree Tracker v3.2 - New Icon & Filters</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #f0fdf4 0%, #e8f5e0 100%);
+        }
+        .header {
+            background: linear-gradient(135deg, #6B7F39 0%, #8A9A5E 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 { margin: 0; font-size: 2.5em; }
+        h2 { color: #6B7F39; margin-top: 30px; border-bottom: 3px solid #6B7F39; padding-bottom: 10px; }
+        .feature {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 12px;
+            border-left: 5px solid #6B7F39;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .feature h3 {
+            color: #6B7F39;
+            margin-top: 0;
+        }
+        .icon-preview {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+            padding: 30px;
+            background: #f9fafb;
+            border-radius: 12px;
+        }
+        .icon-box {
+            text-align: center;
+        }
+        .icon-box img {
+            border-radius: 20%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .success {
+            background: #d1fae5;
+            border-left: 5px solid #10b981;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .highlight {
+            background: #fef3c7;
+            border-left: 5px solid #f59e0b;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        ul { margin: 10px 0 10px 25px; }
+        li { margin: 8px 0; }
+        code {
+            background: #e5e7eb;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .filter-demo {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin: 5px;
+        }
+        .badge-green { background: #d1fae5; color: #047857; }
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+        .badge-purple { background: #e9d5ff; color: #7c3aed; }
+        .badge-yellow { background: #fef3c7; color: #92400e; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🫒 Tree Tracker v3.2</h1>
+        <p style="font-size: 1.2em; margin: 10px 0 0 0;">New Olive Tree Icon + Advanced Filters!</p>
+    </div>
+
+    <div class="success">
+        <strong>🎉 WHAT'S NEW IN v3.2:</strong>
+        <ul>
+            <li>🫒 <strong>New Olive Tree Icon</strong> - Beautiful olive tree with fruits</li>
+            <li>🔍 <strong>Advanced Filters</strong> - Search, condition, size filters</li>
+            <li>🎯 <strong>Smart Sorting</strong> - Sort by name, number, date, age</li>
+            <li>📊 <strong>Filter Summary</strong> - See active filters at a glance</li>
+            <li>✨ <strong>One-Click Clear</strong> - Remove all filters instantly</li>
+        </ul>
+    </div>
+
+    <h2>🫒 New App Icon - Olive Tree</h2>
+
+    <div class="feature">
+        <h3>Beautiful Olive Tree Design</h3>
+        
+        <div class="icon-preview">
+            <div class="icon-box">
+                <p style="margin: 0 0 10px 0; font-weight: bold;">New Icon</p>
+                <div style="width: 120px; height: 120px; background: #6B7F39; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 3em;">
+                    🫒
+                </div>
+                <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #666;">Olive green theme</p>
+            </div>
+        </div>
+
+        <p><strong>Icon Features:</strong></p>
+        <ul>
+            <li>🎨 <strong>Olive green background</strong> (#6B7F39) - Earthy, natural</li>
+            <li>🌿 <strong>Silvery-green foliage</strong> - Realistic olive tree colors</li>
+            <li>🫒 <strong>Dark olive fruits</strong> - Small dots representing olives</li>
+            <li>🌳 <strong>Irregular crown shape</strong> - Authentic olive tree silhouette</li>
+            <li>📱 <strong>Works on all devices</strong> - Looks great at any size</li>
+        </ul>
+
+        <div class="highlight">
+            <strong>Why Olive Tree?</strong><br>
+            Olive trees symbolize peace, longevity, and wisdom - perfect for tree tracking! They're also one of the oldest cultivated trees in history.
+        </div>
+    </div>
+
+    <h2>🔍 Advanced Filtering System</h2>
+
+    <div class="feature">
+        <h3>Filter Panel Location</h3>
+        <p>In the <strong>Trees</strong> tab, look for the <strong>"🔍 Filters & Search"</strong> button between the action buttons and the tree list.</p>
+        
+        <div class="filter-demo">
+            <p style="margin: 0; font-weight: bold; color: #6B7F39;">🔍 Filters & Search ▼ <span class="badge badge-green">Active</span></p>
+        </div>
+
+        <p>Click it to expand/collapse the filter panel.</p>
+    </div>
+
+    <div class="feature">
+        <h3>1. 🔎 Search Box</h3>
+        <p><strong>Search across multiple fields:</strong></p>
+        <ul>
+            <li>Tree name</li>
+            <li>Species</li>
+            <li>Plot name</li>
+            <li>Tree number</li>
+            <li>Notes</li>
+        </ul>
+
+        <p><strong>How to use:</strong></p>
+        <ol>
+            <li>Type anything in the search box</li>
+            <li>Results filter instantly as you type</li>
+            <li>Search is case-insensitive</li>
+        </ol>
+
+        <div class="success">
+            <strong>Examples:</strong><br>
+            • Type "oak" → Shows all oaks<br>
+            • Type "001" → Shows tree #001<br>
+            • Type "north" → Shows all trees in North plots<br>
+            • Type "disease" → Shows trees with "disease" in notes
+        </div>
+    </div>
+
+    <div class="feature">
+        <h3>2. 🟢 Condition Filter</h3>
+        <p><strong>Filter by tree health status:</strong></p>
+        <ul>
+            <li>All Conditions (default)</li>
+            <li>Healthy</li>
+            <li>Needs Care</li>
+            <li>Diseased</li>
+            <li>Dead</li>
+        </ul>
+
+        <p><strong>Use cases:</strong></p>
+        <ul>
+            <li>See only trees needing attention</li>
+            <li>Review all diseased trees</li>
+            <li>Count healthy vs unhealthy trees</li>
+            <li>Plan maintenance work</li>
+        </ul>
+    </div>
+
+    <div class="feature">
+        <h3>3. 📏 Size Filter</h3>
+        <p><strong>Filter by tree size:</strong></p>
+        <ul>
+            <li>All Sizes (default)</li>
+            <li>Very Small</li>
+            <li>Small</li>
+            <li>Medium</li>
+            <li>Large</li>
+        </ul>
+
+        <p><strong>Use cases:</strong></p>
+        <ul>
+            <li>View only mature (large) trees</li>
+            <li>Find all saplings (very small)</li>
+            <li>Compare trees of similar size</li>
+            <li>Plan pruning or support needs</li>
+        </ul>
+    </div>
+
+    <div class="feature">
+        <h3>4. 🔢 Sort Options</h3>
+        <p><strong>Sort your trees by:</strong></p>
+        <ul>
+            <li><strong>Name (A-Z)</strong> - Alphabetical order (default)</li>
+            <li><strong>Tree Number</strong> - Numerical order (001, 002, ...)</li>
+            <li><strong>Plant Date (Oldest)</strong> - Oldest trees first</li>
+            <li><strong>Plant Date (Newest)</strong> - Newest trees first</li>
+        </ul>
+
+        <p><strong>Use cases:</strong></p>
+        <ul>
+            <li>Find trees by number quickly</li>
+            <li>Review planting history</li>
+            <li>See which trees need replacement soon</li>
+            <li>Track new plantings</li>
+        </ul>
+    </div>
+
+    <h2>🎯 Using Filters Effectively</h2>
+
+    <div class="feature">
+        <h3>Combining Multiple Filters</h3>
+        <p>You can use multiple filters together for powerful searches!</p>
+
+        <div class="filter-demo">
+            <p><strong>Example 1: Find all large, healthy oaks</strong></p>
+            <ol>
+                <li>Size: Large</li>
+                <li>Condition: Healthy</li>
+                <li>Search: "oak"</li>
+            </ol>
+            <p>Result: Only large, healthy oak trees</p>
+        </div>
+
+        <div class="filter-demo">
+            <p><strong>Example 2: Trees needing care in North Garden</strong></p>
+            <ol>
+                <li>Plot: North Garden (click from Plots tab)</li>
+                <li>Condition: Needs Care</li>
+            </ol>
+            <p>Result: Trees in North Garden that need attention</p>
+        </div>
+
+        <div class="filter-demo">
+            <p><strong>Example 3: Recently planted small trees</strong></p>
+            <ol>
+                <li>Size: Small</li>
+                <li>Sort By: Plant Date (Newest)</li>
+            </ol>
+            <p>Result: Small trees sorted by newest first</p>
+        </div>
+    </div>
+
+    <div class="feature">
+        <h3>Active Filters Summary</h3>
+        <p>When filters are active, you'll see:</p>
+
+        <div class="filter-demo">
+            <p style="margin-bottom: 10px;"><strong>Active:</strong></p>
+            <span class="badge badge-blue">Plot: North Garden ✕</span>
+            <span class="badge badge-green">healthy ✕</span>
+            <span class="badge badge-purple">large ✕</span>
+            <span class="badge badge-yellow">Search: "oak" ✕</span>
+        </div>
+
+        <p><strong>Features:</strong></p>
+        <ul>
+            <li>See all active filters at a glance</li>
+            <li>Click ✕ on any badge to remove that filter</li>
+            <li>Click "✕ Clear All" to remove everything</li>
+            <li>Color-coded for easy identification</li>
+        </ul>
+    </div>
+
+    <div class="feature">
+        <h3>Result Counter</h3>
+        <p>The header always shows your filtered results:</p>
+
+        <div class="filter-demo">
+            <p style="margin: 0; color: #666;">
+                <strong>No filters:</strong> Total trees: 150
+            </p>
+            <p style="margin: 10px 0 0 0; color: #666;">
+                <strong>With filters:</strong> Showing 23 of 150 trees
+            </p>
+        </div>
+
+        <p>This helps you know exactly how many trees match your criteria!</p>
+    </div>
+
+    <h2>📱 Filter Tips & Tricks</h2>
+
+    <div class="feature">
+        <h3>Quick Workflows</h3>
+
+        <p><strong>Daily Maintenance Check:</strong></p>
+        <ol>
+            <li>Filter: Condition = "Needs Care"</li>
+            <li>See all trees requiring attention</li>
+            <li>Work through the list</li>
+        </ol>
+
+        <p><strong>Plot Inspection:</strong></p>
+        <ol>
+            <li>Go to Plots tab</li>
+            <li>Click "View Trees" on a plot</li>
+            <li>Add filters for specific checks</li>
+            <li>Click "← All Trees" when done</li>
+        </ol>
+
+        <p><strong>Inventory by Size:</strong></p>
+        <ol>
+            <li>Filter: Size = "Large"</li>
+            <li>View Mode: Table</li>
+            <li>See all mature trees in spreadsheet format</li>
+        </ol>
+
+        <p><strong>Finding Specific Tree:</strong></p>
+        <ol>
+            <li>View Mode: List or Compact</li>
+            <li>Search: Type tree number</li>
+            <li>Instant result!</li>
+        </ol>
+    </div>
+
+    <div class="feature">
+        <h3>Performance Tips</h3>
+        <ul>
+            <li>💡 Use filters to reduce visible trees for faster loading</li>
+            <li>💡 Combine with List/Table/Compact views for best speed</li>
+            <li>💡 Grid view + filters = perfect for visual inspection</li>
+            <li>💡 Clear filters when done to see full collection</li>
+        </ul>
+    </div>
+
+    <h2>🔄 What Works With Filters</h2>
+
+    <div class="success">
+        <strong>✅ Filters work seamlessly with:</strong>
+        <ul>
+            <li>All 4 view modes (Grid, List, Table, Compact)</li>
+            <li>Plot filtering from Plots tab</li>
+            <li>Edit and delete operations</li>
+            <li>Export data function</li>
+            <li>All existing features</li>
+        </ul>
+    </div>
+
+    <h2>📦 Update Instructions</h2>
+
+    <div class="feature">
+        <h3>Files to Update on GitHub</h3>
+        <ol>
+            <li><strong>index.html</strong> - Contains new filters and logic</li>
+            <li><strong>icon-192.png</strong> - New olive tree icon (small)</li>
+            <li><strong>icon-512.png</strong> - New olive tree icon (large)</li>
+        </ol>
+
+        <div class="highlight">
+            <strong>⚠️ Important:</strong> Replace all 3 files for the complete update!
+        </div>
+
+        <h3>After Uploading:</h3>
+        <ol>
+            <li>Wait 1-2 minutes for GitHub Pages to update</li>
+            <li>On your phone, clear Chrome cache</li>
+            <li>Uninstall old app (if installed)</li>
+            <li>Visit your GitHub Pages URL</li>
+            <li>Reinstall with new olive tree icon!</li>
+        </ol>
+    </div>
+
+    <h2>🎨 Color Scheme Updated</h2>
+
+    <div class="feature">
+        <p>The entire app now uses an <strong>olive green</strong> theme:</p>
+        <ul>
+            <li>🎨 Primary color: Olive green (#6B7F39)</li>
+            <li>🫒 Icon background: Matching olive green</li>
+            <li>📱 Status bar: Olive green on Android</li>
+            <li>✨ Consistent natural, earthy feel throughout</li>
+        </ul>
+    </div>
+
+    <div style="background: linear-gradient(135deg, #6B7F39 0%, #8A9A5E 100%); color: white; padding: 30px; border-radius: 15px; text-align: center; margin-top: 40px;">
+        <h2 style="margin: 0; color: white;">🫒 Tree Tracker v3.2 Ready!</h2>
+        <p style="margin: 10px 0 0 0; font-size: 1.1em;">
+            Olive Tree Icon • Advanced Filters • Smart Search • Better Than Ever!
+        </p>
+    </div>
+
+</body>
+</html>
