@@ -620,8 +620,8 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                 switch (condition) {
                     case 'healthy': return 'bg-green-100 text-green-800 border-green-300';
                     case 'needs-care': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-                    case 'diseased': return 'bg-orange-100 text-orange-800 border-orange-300';
-                    case 'dead': return 'bg-red-100 text-red-800 border-red-300';
+                    case 'bad': return 'bg-orange-100 text-orange-800 border-orange-300';
+                    case 'RIP': return 'bg-red-100 text-red-800 border-red-300';
                     default: return 'bg-gray-100 text-gray-800 border-gray-300';
                 }
             };
@@ -1009,8 +1009,8 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                                             >
                                                 <option value="healthy">Healthy</option>
                                                 <option value="needs-care">Needs Care</option>
-                                                <option value="diseased">Diseased</option>
-                                                <option value="dead">Dead</option>
+                                                <option value="bad">bad</option>
+                                                <option value="RIP">RIP</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1314,7 +1314,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,healthy,Young tree`;
                                                         <p className="text-xs text-gray-600">📍 {tree.plotName}</p>
                                                         <p className="text-xs text-gray-500">{calculateAge(tree.plantDate)}</p>
                                                         <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>
-                                                            {tree.condition === 'healthy' ? '✓' : tree.condition === 'needs-care' ? '!' : tree.condition === 'diseased' ? '⚠' : '✕'}
+                                                            {tree.condition === 'healthy' ? '✓' : tree.condition === 'needs-care' ? '!' : tree.condition === 'bad' ? '⚠' : '✕'}
                                                         </div>
                                                     </div>
                                                 </div>
