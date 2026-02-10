@@ -123,7 +123,7 @@
             const [plots, setPlots] = useState([]);
             const [currentTab, setCurrentTab] = useState('trees');
             const [currentView, setCurrentView] = useState('list');
-            const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'table', 'list'
+            const [listViewMode, setListViewMode] = useState('grid');
             const [selectedTreeId, setSelectedTreeId] = useState(null);
             const [showForm, setShowForm] = useState(false);
             const [showPlotForm, setShowPlotForm] = useState(false);
@@ -145,7 +145,8 @@
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
             const fileRef = useRef(null);
-            const importRef = useRef(null);
+            const importCSVRef = useRef(null);
+            const importJSONRef = useRef(null);
 
             useEffect(() => { loadData(); }, []);
 
@@ -289,7 +290,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                 window.URL.revokeObjectURL(url);
             }
 
-            function handleImport(e) {
+            function handleCSVImport(e) {
                 const file = e.target.files[0];
                 if (!file) return;
 
@@ -325,11 +326,67 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                         setTrees(updated);
                         await saveTrees(updated);
                         
-                        alert(`Successfully imported ${importedTrees.length} trees!`);
+                        showSave(`✅ Imported ${importedTrees.length} trees!`);
                         setShowImport(false);
-                        if (importRef.current) importRef.current.value = '';
+                        if (importCSVRef.current) importCSVRef.current.value = '';
                     } catch (error) {
                         alert('Error importing CSV file');
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            function handleJSONImport(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const jsonData = JSON.parse(event.target.result);
+                        
+                        // Validate JSON structure
+                        if (!jsonData.trees && !jsonData.plots) {
+                            alert('Invalid backup file format. Expected {trees: [...], plots: [...]}');
+                            return;
+                        }
+
+                        const confirmMsg = `This will restore:\n- ${jsonData.trees?.length || 0} trees\n- ${jsonData.plots?.length || 0} plots\n\nDo you want to REPLACE current data or MERGE with existing?`;
+                        
+                        const result = confirm(confirmMsg + '\n\nClick OK to REPLACE, Cancel to MERGE');
+                        
+                        if (result) {
+                            // REPLACE mode
+                            if (jsonData.trees) {
+                                setTrees(jsonData.trees);
+                                await saveTrees(jsonData.trees);
+                            }
+                            if (jsonData.plots) {
+                                setPlots(jsonData.plots);
+                                await savePlots(jsonData.plots);
+                            }
+                            showSave('✅ Data replaced successfully!');
+                        } else {
+                            // MERGE mode
+                            if (jsonData.trees) {
+                                const mergedTrees = [...trees, ...jsonData.trees];
+                                setTrees(mergedTrees);
+                                await saveTrees(mergedTrees);
+                            }
+                            if (jsonData.plots) {
+                                const mergedPlots = [...plots, ...jsonData.plots];
+                                setPlots(mergedPlots);
+                                await savePlots(mergedPlots);
+                            }
+                            showSave('✅ Data merged successfully!');
+                        }
+                        
+                        setShowImport(false);
+                        if (importJSONRef.current) importJSONRef.current.value = '';
+                        
+                    } catch (error) {
+                        alert('Error importing JSON file. Please check the file format.');
+                        console.error(error);
                     }
                 };
                 reader.readAsText(file);
@@ -445,9 +502,9 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                     <div className="flex justify-between items-center flex-wrap gap-3">
                                         <div className="flex gap-2 flex-wrap">
                                             <button onClick={() => setShowForm(!showForm)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">➕ Add Tree</button>
-                                            <button onClick={downloadTemplate} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">📄 Download Template</button>
-                                            <button onClick={() => setShowImport(!showImport)} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">📥 Import CSV</button>
-                                            <button onClick={exportData} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">💾 Export Backup</button>
+                                            <button onClick={downloadTemplate} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">📄 Template</button>
+                                            <button onClick={() => setShowImport(!showImport)} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">📥 Import</button>
+                                            <button onClick={exportData} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">💾 Export</button>
                                         </div>
 
                                         {/* View Mode Selector */}
@@ -463,15 +520,35 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                 {/* Import Section */}
                                 {showImport && (
                                     <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                        <h2 className="text-xl font-bold mb-4">Import Trees from CSV</h2>
-                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                                            <p className="text-sm text-blue-800 mb-2"><strong>CSV Format:</strong></p>
-                                            <code className="text-xs">Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition</code>
-                                            <p className="text-sm text-blue-800 mt-2">Size: very-small, small, medium, large</p>
-                                            <p className="text-sm text-blue-800">Condition: good, medium, bad, RIP</p>
+                                        <h2 className="text-xl font-bold mb-4">Import Data</h2>
+                                        
+                                        {/* CSV Import */}
+                                        <div className="mb-6 pb-6 border-b">
+                                            <h3 className="font-semibold mb-3">📄 Import Trees from CSV</h3>
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                                <p className="text-sm text-blue-800 mb-2"><strong>CSV Format:</strong></p>
+                                                <code className="text-xs">Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition</code>
+                                                <p className="text-sm text-blue-800 mt-2">Size: very-small, small, medium, large</p>
+                                                <p className="text-sm text-blue-800">Condition: good, medium, bad, RIP</p>
+                                            </div>
+                                            <input ref={importCSVRef} type="file" accept=".csv" onChange={handleCSVImport} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
-                                        <input ref={importRef} type="file" accept=".csv" onChange={handleImport} className="w-full px-3 py-2 border rounded-lg" />
-                                        <button onClick={() => setShowImport(false)} className="mt-4 bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg">Close</button>
+
+                                        {/* JSON Import */}
+                                        <div>
+                                            <h3 className="font-semibold mb-3">💾 Restore from Backup (JSON)</h3>
+                                            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                                                <p className="text-sm text-green-800 mb-2"><strong>Import Options:</strong></p>
+                                                <ul className="text-sm text-green-800 list-disc list-inside">
+                                                    <li><strong>Replace:</strong> Delete all current data and restore from backup</li>
+                                                    <li><strong>Merge:</strong> Keep current data and add backup data</li>
+                                                </ul>
+                                                <p className="text-sm text-green-800 mt-2">⚠️ You'll be asked to choose when you select the file</p>
+                                            </div>
+                                            <input ref={importJSONRef} type="file" accept=".json" onChange={handleJSONImport} className="w-full px-3 py-2 border rounded-lg" />
+                                        </div>
+
+                                        <button onClick={() => setShowImport(false)} className="mt-6 bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg">Close</button>
                                     </div>
                                 )}
 
@@ -578,7 +655,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                     </div>
                                 ) : (
                                     <>
-                                        {/* GRID VIEW - Full with pictures */}
+                                        {/* GRID VIEW */}
                                         {listViewMode === 'grid' && (
                                             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                                                 {filteredTrees.map(tree => (
@@ -607,7 +684,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                             </div>
                                         )}
 
-                                        {/* COMPACT VIEW - Dense grid */}
+                                        {/* COMPACT VIEW */}
                                         {listViewMode === 'compact' && (
                                             <div className="grid md:grid-cols-4 lg:grid-cols-5 gap-3">
                                                 {filteredTrees.map(tree => (
@@ -634,7 +711,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                             </div>
                                         )}
 
-                                        {/* LIST VIEW - No images */}
+                                        {/* LIST VIEW */}
                                         {listViewMode === 'list' && (
                                             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
                                                 {filteredTrees.map((tree, idx) => (
@@ -660,7 +737,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                             </div>
                                         )}
 
-                                        {/* TABLE VIEW - Spreadsheet style */}
+                                        {/* TABLE VIEW */}
                                         {listViewMode === 'table' && (
                                             <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
                                                 <table className="w-full">
