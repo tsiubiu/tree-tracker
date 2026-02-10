@@ -29,11 +29,19 @@
         const storage = {
             dbName: 'TreeTrackerDB',
             db: null,
+            storageType: 'localStorage',
             init: async function() {
                 return new Promise((resolve) => {
                     const request = indexedDB.open(this.dbName, 1);
-                    request.onerror = () => resolve(false);
-                    request.onsuccess = (event) => { this.db = event.target.result; resolve(true); };
+                    request.onerror = () => { 
+                        this.storageType = 'localStorage';
+                        resolve(false); 
+                    };
+                    request.onsuccess = (event) => { 
+                        this.db = event.target.result; 
+                        this.storageType = 'IndexedDB';
+                        resolve(true); 
+                    };
                     request.onupgradeneeded = (event) => {
                         const db = event.target.result;
                         if (!db.objectStoreNames.contains('data')) {
@@ -114,16 +122,17 @@
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
             const [currentTab, setCurrentTab] = useState('trees');
-            const [currentView, setCurrentView] = useState('list'); // 'list' or 'detail'
+            const [currentView, setCurrentView] = useState('list');
+            const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'table', 'list'
             const [selectedTreeId, setSelectedTreeId] = useState(null);
             const [showForm, setShowForm] = useState(false);
             const [showPlotForm, setShowPlotForm] = useState(false);
+            const [showImport, setShowImport] = useState(false);
             const [editId, setEditId] = useState(null);
             const [saveMsg, setSaveMsg] = useState('');
             const [loading, setLoading] = useState(true);
             const [newNote, setNewNote] = useState('');
             
-            // FILTERS
             const [filterPlot, setFilterPlot] = useState('all');
             const [filterCondition, setFilterCondition] = useState('all');
             const [filterYear, setFilterYear] = useState('all');
@@ -136,6 +145,7 @@
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
             const fileRef = useRef(null);
+            const importRef = useRef(null);
 
             useEffect(() => { loadData(); }, []);
 
@@ -154,7 +164,6 @@
             async function saveTrees(data) { await storage.set('trees', JSON.stringify(data)); showSave('✅ Saved!'); }
             async function savePlots(data) { await storage.set('plots', JSON.stringify(data)); showSave('✅ Saved!'); }
 
-            // Tree handlers
             async function handleTreeSubmit(e) {
                 e.preventDefault();
                 const newTree = { 
@@ -201,7 +210,6 @@
                 }
             }
 
-            // Notes handlers
             async function addNote(treeId, noteText) {
                 if (!noteText.trim()) return;
                 
@@ -236,7 +244,6 @@
                 }
             }
 
-            // Plot handlers
             async function handlePlotSubmit(e) {
                 e.preventDefault();
                 const newPlot = { id: editId || Date.now().toString(), ...plotForm };
@@ -256,7 +263,6 @@
                 }
             }
 
-            // View tree detail
             function viewTreeDetail(treeId) {
                 setSelectedTreeId(treeId);
                 setCurrentView('detail');
@@ -267,7 +273,80 @@
                 setCurrentView('list');
             }
 
-            // FILTER TREES
+            // Import/Export
+            function downloadTemplate() {
+                const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition
+Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good
+Maple Tree,Sugar Maple,South Plot,002,medium,2024-02-20,medium
+Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
+                
+                const blob = new Blob([template], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'tree_template.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+
+            function handleImport(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+                        const dataLines = lines.slice(1);
+                        
+                        const importedTrees = dataLines.map((line, index) => {
+                            const values = line.split(',').map(v => v.trim());
+                            return {
+                                id: Date.now().toString() + index,
+                                name: values[0] || '',
+                                species: values[1] || '',
+                                plotName: values[2] || '',
+                                treeNumber: values[3] || '',
+                                size: values[4] || 'medium',
+                                plantDate: values[5] || '',
+                                condition: values[6] || 'good',
+                                photo: '',
+                                notes: []
+                            };
+                        }).filter(tree => tree.name && tree.species);
+
+                        if (importedTrees.length === 0) {
+                            alert('No valid tree data found');
+                            return;
+                        }
+
+                        const updated = [...trees, ...importedTrees];
+                        setTrees(updated);
+                        await saveTrees(updated);
+                        
+                        alert(`Successfully imported ${importedTrees.length} trees!`);
+                        setShowImport(false);
+                        if (importRef.current) importRef.current.value = '';
+                    } catch (error) {
+                        alert('Error importing CSV file');
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            function exportData() {
+                const data = { trees, plots };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tree-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showSave('✅ Backup downloaded!');
+            }
+
             function getFilteredTrees() {
                 let filtered = trees;
                 
@@ -347,6 +426,9 @@
                                 {currentTab === 'trees' && currentView === 'detail' && selectedTree && `${selectedTree.name} - Details`}
                                 {currentTab === 'plots' && `Plots: ${plots.length}`}
                             </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                💾 Storage: {storage.storageType} {storage.storageType === 'IndexedDB' ? '(Browser Database)' : '(Browser Cache)'}
+                            </p>
                         </div>
 
                         {/* Tabs */}
@@ -360,8 +442,38 @@
                             <>
                                 {/* Action Buttons */}
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                    <button onClick={() => setShowForm(!showForm)} className="bg-green-600 text-white px-4 py-2 rounded-lg">➕ Add Tree</button>
+                                    <div className="flex justify-between items-center flex-wrap gap-3">
+                                        <div className="flex gap-2 flex-wrap">
+                                            <button onClick={() => setShowForm(!showForm)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">➕ Add Tree</button>
+                                            <button onClick={downloadTemplate} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">📄 Download Template</button>
+                                            <button onClick={() => setShowImport(!showImport)} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">📥 Import CSV</button>
+                                            <button onClick={exportData} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">💾 Export Backup</button>
+                                        </div>
+
+                                        {/* View Mode Selector */}
+                                        <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                                            <button onClick={() => setListViewMode('grid')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'grid' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Grid View">⊞</button>
+                                            <button onClick={() => setListViewMode('compact')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'compact' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Compact View">▦</button>
+                                            <button onClick={() => setListViewMode('list')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'list' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="List View">≡</button>
+                                            <button onClick={() => setListViewMode('table')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'table' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Table View">☰</button>
+                                        </div>
+                                    </div>
                                 </div>
+
+                                {/* Import Section */}
+                                {showImport && (
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-xl font-bold mb-4">Import Trees from CSV</h2>
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                            <p className="text-sm text-blue-800 mb-2"><strong>CSV Format:</strong></p>
+                                            <code className="text-xs">Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition</code>
+                                            <p className="text-sm text-blue-800 mt-2">Size: very-small, small, medium, large</p>
+                                            <p className="text-sm text-blue-800">Condition: good, medium, bad, RIP</p>
+                                        </div>
+                                        <input ref={importRef} type="file" accept=".csv" onChange={handleImport} className="w-full px-3 py-2 border rounded-lg" />
+                                        <button onClick={() => setShowImport(false)} className="mt-4 bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg">Close</button>
+                                    </div>
+                                )}
 
                                 {/* FILTERS */}
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
@@ -410,26 +522,10 @@
                                     {hasActiveFilters && (
                                         <div className="mt-3 pt-3 border-t flex flex-wrap gap-2">
                                             <span className="text-sm text-gray-600">Active:</span>
-                                            {filterPlot !== 'all' && (
-                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                                                    Plot: {filterPlot} <button onClick={() => setFilterPlot('all')} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {filterCondition !== 'all' && (
-                                                <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                                                    {filterCondition} <button onClick={() => setFilterCondition('all')} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {filterYear !== 'all' && (
-                                                <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full">
-                                                    Year: {filterYear} <button onClick={() => setFilterYear('all')} className="ml-1">✕</button>
-                                                </span>
-                                            )}
-                                            {searchText.trim() && (
-                                                <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
-                                                    Search: "{searchText}" <button onClick={() => setSearchText('')} className="ml-1">✕</button>
-                                                </span>
-                                            )}
+                                            {filterPlot !== 'all' && (<span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">Plot: {filterPlot} <button onClick={() => setFilterPlot('all')} className="ml-1">✕</button></span>)}
+                                            {filterCondition !== 'all' && (<span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">{filterCondition} <button onClick={() => setFilterCondition('all')} className="ml-1">✕</button></span>)}
+                                            {filterYear !== 'all' && (<span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full">Year: {filterYear} <button onClick={() => setFilterYear('all')} className="ml-1">✕</button></span>)}
+                                            {searchText.trim() && (<span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">Search: "{searchText}" <button onClick={() => setSearchText('')} className="ml-1">✕</button></span>)}
                                         </div>
                                     )}
                                 </div>
@@ -471,47 +567,136 @@
                                     </div>
                                 )}
 
-                                {/* Tree List */}
+                                {/* Tree List - Different Views */}
                                 {filteredTrees.length === 0 ? (
                                     <div className="bg-white rounded-lg shadow-lg p-12 text-center">
                                         <div className="text-6xl mb-4">🌳</div>
                                         <h3 className="text-xl font-semibold text-gray-600">
                                             {hasActiveFilters ? 'No trees match filters' : 'No trees yet'}
                                         </h3>
-                                        {hasActiveFilters && (
-                                            <button onClick={clearFilters} className="mt-4 text-blue-600 hover:text-blue-800">Clear filters</button>
-                                        )}
+                                        {hasActiveFilters && (<button onClick={clearFilters} className="mt-4 text-blue-600">Clear filters</button>)}
                                     </div>
                                 ) : (
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {filteredTrees.map(tree => (
-                                            <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
-                                                {tree.photo && <img src={tree.photo} className="w-full h-48 object-cover" />}
-                                                <div className="p-4">
-                                                    <div className="flex justify-between mb-2">
-                                                        <div>
-                                                            <h3 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h3>
-                                                            <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                    <>
+                                        {/* GRID VIEW - Full with pictures */}
+                                        {listViewMode === 'grid' && (
+                                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                {filteredTrees.map(tree => (
+                                                    <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
+                                                        {tree.photo && <img src={tree.photo} className="w-full h-48 object-cover" />}
+                                                        <div className="p-4">
+                                                            <div className="flex justify-between mb-2">
+                                                                <div>
+                                                                    <h3 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h3>
+                                                                    <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                                                </div>
+                                                                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                    <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
+                                                                    <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-1 text-sm text-gray-600 mb-2">
+                                                                <div>📍 {tree.plotName}</div>
+                                                                <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
+                                                                {tree.notes && tree.notes.length > 0 && (<div>📝 {tree.notes.length} note{tree.notes.length !== 1 ? 's' : ''}</div>)}
+                                                            </div>
+                                                            <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
                                                         </div>
-                                                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                                            <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
-                                                            <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
-                                                        </div>
                                                     </div>
-                                                    <div className="space-y-1 text-sm text-gray-600 mb-2">
-                                                        <div>📍 {tree.plotName}</div>
-                                                        <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
-                                                        {tree.notes && tree.notes.length > 0 && (
-                                                            <div>📝 {tree.notes.length} note{tree.notes.length !== 1 ? 's' : ''}</div>
-                                                        )}
-                                                    </div>
-                                                    <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>
-                                                        {tree.condition}
-                                                    </div>
-                                                </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
+                                        )}
+
+                                        {/* COMPACT VIEW - Dense grid */}
+                                        {listViewMode === 'compact' && (
+                                            <div className="grid md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                                {filteredTrees.map(tree => (
+                                                    <div key={tree.id} className="bg-white rounded-lg shadow p-3 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-bold text-sm truncate">{tree.name}</h4>
+                                                                <p className="text-xs text-gray-500 truncate">{tree.species}</p>
+                                                            </div>
+                                                            <div className="flex gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
+                                                                <button onClick={() => editTree(tree)} className="text-blue-600 text-xs">✏️</button>
+                                                                <button onClick={() => deleteTree(tree.id)} className="text-red-600 text-xs">🗑️</button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">#{tree.treeNumber}</span>
+                                                            </div>
+                                                            <p className="text-xs text-gray-600 truncate">📍 {tree.plotName}</p>
+                                                            <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* LIST VIEW - No images */}
+                                        {listViewMode === 'list' && (
+                                            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+                                                {filteredTrees.map((tree, idx) => (
+                                                    <div key={tree.id} className={`p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer ${idx !== 0 ? 'border-t' : ''}`} onClick={() => viewTreeDetail(tree.id)}>
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-3 mb-1">
+                                                                <h3 className="text-lg font-bold">{tree.name}</h3>
+                                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span>
+                                                                <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-4 text-sm text-gray-600">
+                                                                <span className="italic">{tree.species}</span>
+                                                                <span>📍 {tree.plotName}</span>
+                                                                <span>📅 {new Date(tree.plantDate).toLocaleDateString()}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                                            <button onClick={() => editTree(tree)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded">✏️</button>
+                                                            <button onClick={() => deleteTree(tree.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* TABLE VIEW - Spreadsheet style */}
+                                        {listViewMode === 'table' && (
+                                            <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
+                                                <table className="w-full">
+                                                    <thead className="bg-green-600 text-white">
+                                                        <tr>
+                                                            <th className="px-4 py-3 text-left">Tree #</th>
+                                                            <th className="px-4 py-3 text-left">Name</th>
+                                                            <th className="px-4 py-3 text-left">Species</th>
+                                                            <th className="px-4 py-3 text-left">Plot</th>
+                                                            <th className="px-4 py-3 text-left">Planted</th>
+                                                            <th className="px-4 py-3 text-left">Condition</th>
+                                                            <th className="px-4 py-3 text-left">Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {filteredTrees.map((tree, idx) => (
+                                                            <tr key={tree.id} className={`${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-green-50 cursor-pointer`} onClick={() => viewTreeDetail(tree.id)}>
+                                                                <td className="px-4 py-3"><span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span></td>
+                                                                <td className="px-4 py-3 font-semibold">{tree.name}</td>
+                                                                <td className="px-4 py-3 text-gray-600 italic">{tree.species}</td>
+                                                                <td className="px-4 py-3 text-gray-600">{tree.plotName}</td>
+                                                                <td className="px-4 py-3 text-sm text-gray-600">{new Date(tree.plantDate).toLocaleDateString()}</td>
+                                                                <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span></td>
+                                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                                    <div className="flex gap-2">
+                                                                        <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
+                                                                        <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </>
                         )}
@@ -519,12 +704,10 @@
                         {/* TREES TAB - DETAIL VIEW */}
                         {currentTab === 'trees' && currentView === 'detail' && selectedTree && (
                             <div>
-                                {/* Back Button */}
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
                                     <button onClick={backToList} className="text-blue-600 hover:text-blue-800 font-semibold">← Back to Trees</button>
                                 </div>
 
-                                {/* Tree Details */}
                                 <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
@@ -540,87 +723,40 @@
                                         </div>
                                     </div>
 
-                                    {selectedTree.photo && (
-                                        <div className="mb-6">
-                                            <img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg" />
-                                        </div>
-                                    )}
+                                    {selectedTree.photo && (<div className="mb-6"><img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg" /></div>)}
 
                                     <div className="grid md:grid-cols-2 gap-6 mb-6">
                                         <div>
                                             <h3 className="font-semibold text-gray-700 mb-3">Tree Information</h3>
                                             <div className="space-y-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium">📍 Plot:</span>
-                                                    <span>{selectedTree.plotName}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium">📏 Size:</span>
-                                                    <span className="capitalize">{selectedTree.size?.replace('-', ' ')}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium">📅 Planted:</span>
-                                                    <span>{new Date(selectedTree.plantDate).toLocaleDateString()}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium">🏥 Condition:</span>
-                                                    <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>
-                                                        {selectedTree.condition}
-                                                    </span>
-                                                </div>
+                                                <div className="flex items-center gap-2"><span className="font-medium">📍 Plot:</span><span>{selectedTree.plotName}</span></div>
+                                                <div className="flex items-center gap-2"><span className="font-medium">📏 Size:</span><span className="capitalize">{selectedTree.size?.replace('-', ' ')}</span></div>
+                                                <div className="flex items-center gap-2"><span className="font-medium">📅 Planted:</span><span>{new Date(selectedTree.plantDate).toLocaleDateString()}</span></div>
+                                                <div className="flex items-center gap-2"><span className="font-medium">🏥 Condition:</span><span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Notes Section */}
                                 <div className="bg-white rounded-lg shadow-lg p-6">
                                     <h3 className="text-2xl font-bold mb-4">📝 Notes History</h3>
-                                    
-                                    {/* Add Note Form */}
                                     <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                                         <label className="block font-medium mb-2">Add New Note</label>
                                         <div className="flex gap-2">
-                                            <input
-                                                type="text"
-                                                value={newNote}
-                                                onChange={(e) => setNewNote(e.target.value)}
-                                                placeholder="Type your note here..."
-                                                className="flex-1 px-3 py-2 border rounded-lg"
-                                                onKeyPress={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        addNote(selectedTree.id, newNote);
-                                                    }
-                                                }}
-                                            />
-                                            <button
-                                                onClick={() => addNote(selectedTree.id, newNote)}
-                                                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
-                                            >
-                                                Add Note
-                                            </button>
+                                            <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Type your note here..." className="flex-1 px-3 py-2 border rounded-lg" onKeyPress={(e) => { if (e.key === 'Enter') addNote(selectedTree.id, newNote); }} />
+                                            <button onClick={() => addNote(selectedTree.id, newNote)} className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">Add Note</button>
                                         </div>
                                     </div>
 
-                                    {/* Notes List */}
                                     {!selectedTree.notes || selectedTree.notes.length === 0 ? (
-                                        <div className="text-center py-8 text-gray-500">
-                                            <p>No notes yet. Add your first note above!</p>
-                                        </div>
+                                        <div className="text-center py-8 text-gray-500"><p>No notes yet. Add your first note above!</p></div>
                                     ) : (
                                         <div className="space-y-3">
                                             {[...selectedTree.notes].reverse().map(note => (
                                                 <div key={note.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100">
                                                     <div className="flex justify-between items-start mb-2">
-                                                        <div className="text-sm text-gray-500">
-                                                            📅 {new Date(note.date).toLocaleDateString()} at {new Date(note.date).toLocaleTimeString()}
-                                                        </div>
-                                                        <button
-                                                            onClick={() => deleteNote(selectedTree.id, note.id)}
-                                                            className="text-red-600 hover:text-red-800 text-sm"
-                                                        >
-                                                            🗑️
-                                                        </button>
+                                                        <div className="text-sm text-gray-500">📅 {new Date(note.date).toLocaleDateString()} at {new Date(note.date).toLocaleTimeString()}</div>
+                                                        <button onClick={() => deleteNote(selectedTree.id, note.id)} className="text-red-600 hover:text-red-800 text-sm">🗑️</button>
                                                     </div>
                                                     <p className="text-gray-800">{note.text}</p>
                                                 </div>
@@ -669,12 +805,7 @@
                                                     <button onClick={() => deletePlot(plot.id)} className="text-red-600">🗑️</button>
                                                 </div>
                                                 {plot.description && <p className="text-sm text-gray-600 mb-3">{plot.description}</p>}
-                                                <button 
-                                                    onClick={() => { setCurrentTab('trees'); setCurrentView('list'); setFilterPlot(plot.name); }}
-                                                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-                                                >
-                                                    View Trees →
-                                                </button>
+                                                <button onClick={() => { setCurrentTab('trees'); setCurrentView('list'); setFilterPlot(plot.name); }} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">View Trees →</button>
                                             </div>
                                         ))}
                                     </div>
