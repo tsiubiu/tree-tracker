@@ -168,7 +168,7 @@
             
             const [treeForm, setTreeForm] = useState({
                 name: '', species: '', plotName: '', treeNumber: '',
-                size: 'normal', plantDate: '', condition: 'good', photo: '', notes: []
+                size: 'normal', plantDate: '', condition: 'good', photo: '', description: '', notes: []
             });
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
@@ -231,7 +231,7 @@
             }
 
             function resetTreeForm() {
-                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photo: '', notes: []});
+                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photo: '', description: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
             }
@@ -468,10 +468,10 @@
 
             // Import/Export functions
             function downloadTemplate() {
-                const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition
-Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good
-Maple Tree,Sugar Maple,South Plot,002,normal,2024-02-20,medium
-Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
+                const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition,Description
+Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good,Mature oak near the fence
+Maple Tree,Sugar Maple,South Plot,002,normal,2024-02-20,medium,Needs pruning in spring
+Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                 
                 const blob = new Blob([template], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
@@ -504,6 +504,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                 size: values[4] || 'normal',
                                 plantDate: values[5] || '',
                                 condition: values[6] || 'good',
+                                description: values[7] || '',
                                 photo: '',
                                 notes: []
                             };
@@ -697,6 +698,9 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                         <h2 className="text-xl font-bold mb-4">Import Data</h2>
                                         <div className="mb-6 pb-6 border-b">
                                             <h3 className="font-semibold mb-3">📄 CSV Import</h3>
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm text-blue-800">
+                                                <strong>CSV Format:</strong> Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition, Description (optional)
+                                            </div>
                                             <input ref={importCSVRef} type="file" accept=".csv" onChange={handleCSVImport} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
                                         <div>
@@ -777,6 +781,16 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                                 </select>
                                             </div>
                                             <div>
+                                                <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                                                <textarea 
+                                                    placeholder="Additional details about this tree..." 
+                                                    value={treeForm.description} 
+                                                    onChange={e => setTreeForm({...treeForm, description: e.target.value})} 
+                                                    className="w-full px-3 py-2 border rounded" 
+                                                    rows="3"
+                                                />
+                                            </div>
+                                            <div>
                                                 <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="px-3 py-2 border rounded w-full" />
                                                 {treeForm.photo && <img src={treeForm.photo} className="mt-2 h-32 rounded object-cover" />}
                                             </div>
@@ -810,9 +824,10 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                                             <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
                                                         </div>
                                                     </div>
-                                                    <div className="text-sm text-gray-600 mb-2">
+                                                    <div className="space-y-1 text-sm text-gray-600 mb-2">
                                                         <div>📍 {tree.plotName}</div>
                                                         <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
+                                                        {tree.description && <div className="text-xs italic mt-1 line-clamp-2">{tree.description}</div>}
                                                     </div>
                                                     <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
                                                 </div>
@@ -923,6 +938,12 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                         <div>📏 Size: {selectedTree.size}</div>
                                         <div>📅 Planted: {new Date(selectedTree.plantDate).toLocaleDateString()}</div>
                                         <div>🏥 Condition: <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
+                                        {selectedTree.description && (
+                                            <div className="mt-4 pt-4 border-t">
+                                                <div className="font-medium mb-1">📝 Description:</div>
+                                                <div className="text-gray-700 whitespace-pre-wrap">{selectedTree.description}</div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="bg-white rounded-lg shadow-lg p-6">
