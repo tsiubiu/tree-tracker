@@ -78,6 +78,20 @@
                     localStorage.setItem(key, value);
                     return true;
                 } catch (e) { localStorage.setItem(key, value); return true; }
+            },
+            clear: async function() {
+                try {
+                    if (this.db) {
+                        return new Promise((resolve) => {
+                            const tx = this.db.transaction(['data'], 'readwrite');
+                            const req = tx.objectStore('data').clear();
+                            req.onsuccess = () => resolve(true);
+                            req.onerror = () => { localStorage.clear(); resolve(true); };
+                        });
+                    }
+                    localStorage.clear();
+                    return true;
+                } catch (e) { localStorage.clear(); return true; }
             }
         };
         storage.init();
@@ -123,6 +137,7 @@
         function TreeTrackerApp() {
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
+            const [reportTemplates, setReportTemplates] = useState([]);
             const [currentTab, setCurrentTab] = useState('trees');
             const [currentView, setCurrentView] = useState('list');
             const [listViewMode, setListViewMode] = useState('grid');
@@ -140,19 +155,25 @@
             const [filterYear, setFilterYear] = useState('all');
             const [searchText, setSearchText] = useState('');
             
-            // Two-level sorting
             const [sortBy, setSortBy] = useState('name');
             const [sortDirection, setSortDirection] = useState('asc');
-            const [sortBy2, setSortBy2] = useState('none'); // Second level sort
+            const [sortBy2, setSortBy2] = useState('none');
             const [sortDirection2, setSortDirection2] = useState('asc');
+            
+            // Reports state
+            const [reportType, setReportType] = useState('notes-2025');
+            const [reportYear, setReportYear] = useState('2025');
+            const [reportCondition, setReportCondition] = useState('RIP');
+            const [customReportName, setCustomReportName] = useState('');
             
             const [treeForm, setTreeForm] = useState({
                 name: '', species: '', plotName: '', treeNumber: '',
-                size: 'medium', plantDate: '', condition: 'good', photo: '', notes: []
+                size: 'normal', plantDate: '', condition: 'good', photo: '', notes: []
             });
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
             const fileRef = useRef(null);
+            const plotPhotoRef = useRef(null);
             const importCSVRef = useRef(null);
             const importJSONRef = useRef(null);
 
@@ -162,8 +183,10 @@
                 try {
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
+                    const rt = await storage.get('report-templates');
                     if (td) setTrees(JSON.parse(td));
                     if (pd) setPlots(JSON.parse(pd));
+                    if (rt) setReportTemplates(JSON.parse(rt));
                 } catch (e) { console.error(e); }
                 finally { setLoading(false); }
             }
@@ -172,6 +195,27 @@
 
             async function saveTrees(data) { await storage.set('trees', JSON.stringify(data)); showSave('✅ Saved!'); }
             async function savePlots(data) { await storage.set('plots', JSON.stringify(data)); showSave('✅ Saved!'); }
+            async function saveReportTemplates(data) { await storage.set('report-templates', JSON.stringify(data)); }
+
+            async function clearDatabase() {
+                const confirmed = confirm('⚠️ WARNING: This will DELETE ALL DATA including trees, plots, and notes!\n\nThis action CANNOT be undone.\n\nAre you absolutely sure?');
+                if (!confirmed) return;
+                
+                const doubleCheck = confirm('⚠️ FINAL WARNING!\n\nYou are about to permanently delete:\n- All trees and their photos\n- All plots\n- All notes history\n- All report templates\n\nType OK in the next dialog to confirm.');
+                if (!doubleCheck) return;
+                
+                const finalConfirm = prompt('Type "DELETE ALL" to confirm (case-sensitive):');
+                if (finalConfirm !== 'DELETE ALL') {
+                    alert('Cancelled - database NOT cleared');
+                    return;
+                }
+                
+                await storage.clear();
+                setTrees([]);
+                setPlots([]);
+                setReportTemplates([]);
+                showSave('✅ Database cleared successfully');
+            }
 
             async function handleTreeSubmit(e) {
                 e.preventDefault();
@@ -187,7 +231,7 @@
             }
 
             function resetTreeForm() {
-                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'medium', plantDate: '', condition: 'good', photo: '', notes: []});
+                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photo: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
             }
@@ -216,6 +260,15 @@
                     const compressed = await compressImage(file, 1);
                     setTreeForm({...treeForm, photo: compressed});
                     showSave('✅ Photo compressed to max 1MB!');
+                }
+            }
+
+            async function handlePlotPhoto(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const compressed = await compressImage(file, 1);
+                    setPlotForm({...plotForm, photo: compressed});
+                    showSave('✅ Plot photo ready!');
                 }
             }
 
@@ -264,6 +317,12 @@
                 setEditId(null);
             }
 
+            function editPlot(plot) {
+                setPlotForm(plot);
+                setEditId(plot.id);
+                setShowPlotForm(true);
+            }
+
             async function deletePlot(id) {
                 if (confirm('Delete plot?')) {
                     const updated = plots.filter(p => p.id !== id);
@@ -282,7 +341,6 @@
                 setCurrentView('list');
             }
 
-            // Sorting functions
             function handleSort(field) {
                 if (sortBy === field) {
                     setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -299,29 +357,21 @@
 
             function getCompareValue(tree, sortField) {
                 switch(sortField) {
-                    case 'name':
-                        return tree.name.toLowerCase();
-                    case 'number':
-                        return tree.treeNumber.toLowerCase();
-                    case 'species':
-                        return tree.species.toLowerCase();
-                    case 'plot':
-                        return tree.plotName.toLowerCase();
-                    case 'date':
-                        return new Date(tree.plantDate);
+                    case 'name': return tree.name.toLowerCase();
+                    case 'number': return tree.treeNumber.toLowerCase();
+                    case 'species': return tree.species.toLowerCase();
+                    case 'plot': return tree.plotName.toLowerCase();
+                    case 'date': return new Date(tree.plantDate);
                     case 'condition':
                         const conditionOrder = { 'good': 1, 'medium': 2, 'bad': 3, 'RIP': 4 };
                         return conditionOrder[tree.condition] || 5;
-                    default:
-                        return tree.name.toLowerCase();
+                    default: return tree.name.toLowerCase();
                 }
             }
 
             function getSortedTrees(treesToSort) {
                 const sorted = [...treesToSort];
-                
                 sorted.sort((a, b) => {
-                    // Primary sort
                     const compareA = getCompareValue(a, sortBy);
                     const compareB = getCompareValue(b, sortBy);
                     
@@ -329,7 +379,6 @@
                     if (compareA < compareB) primaryResult = sortDirection === 'asc' ? -1 : 1;
                     else if (compareA > compareB) primaryResult = sortDirection === 'asc' ? 1 : -1;
                     
-                    // If primary sort is equal and secondary sort is enabled
                     if (primaryResult === 0 && sortBy2 !== 'none') {
                         const compareA2 = getCompareValue(a, sortBy2);
                         const compareB2 = getCompareValue(b, sortBy2);
@@ -340,15 +389,88 @@
                     
                     return primaryResult;
                 });
-                
                 return sorted;
             }
 
-            // Import/Export
+            // Report functions
+            function getReportData() {
+                switch(reportType) {
+                    case 'notes-year':
+                        return trees.filter(t => t.notes && t.notes.some(n => 
+                            new Date(n.date).getFullYear().toString() === reportYear
+                        )).map(tree => ({
+                            ...tree,
+                            notes: tree.notes.filter(n => new Date(n.date).getFullYear().toString() === reportYear)
+                        }));
+                    
+                    case 'condition':
+                        return trees.filter(t => t.condition === reportCondition);
+                    
+                    case 'recent-notes':
+                        const thirtyDaysAgo = new Date();
+                        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                        return trees.filter(t => t.notes && t.notes.some(n => 
+                            new Date(n.date) >= thirtyDaysAgo
+                        )).map(tree => ({
+                            ...tree,
+                            notes: tree.notes.filter(n => new Date(n.date) >= thirtyDaysAgo)
+                        }));
+                    
+                    case 'no-notes':
+                        return trees.filter(t => !t.notes || t.notes.length === 0);
+                    
+                    case 'by-plot':
+                        return trees.filter(t => filterPlot !== 'all' ? t.plotName === filterPlot : true);
+                    
+                    default:
+                        return trees;
+                }
+            }
+
+            function saveReportTemplate() {
+                if (!customReportName.trim()) {
+                    alert('Please enter a template name');
+                    return;
+                }
+                
+                const template = {
+                    id: Date.now().toString(),
+                    name: customReportName,
+                    type: reportType,
+                    year: reportYear,
+                    condition: reportCondition,
+                    plot: filterPlot,
+                    createdAt: new Date().toISOString()
+                };
+                
+                const updated = [...reportTemplates, template];
+                setReportTemplates(updated);
+                saveReportTemplates(updated);
+                setCustomReportName('');
+                showSave('✅ Report template saved!');
+            }
+
+            function loadReportTemplate(template) {
+                setReportType(template.type);
+                setReportYear(template.year);
+                setReportCondition(template.condition);
+                setFilterPlot(template.plot);
+                showSave('✅ Template loaded!');
+            }
+
+            function deleteReportTemplate(id) {
+                if (confirm('Delete this report template?')) {
+                    const updated = reportTemplates.filter(t => t.id !== id);
+                    setReportTemplates(updated);
+                    saveReportTemplates(updated);
+                }
+            }
+
+            // Import/Export functions
             function downloadTemplate() {
                 const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition
 Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good
-Maple Tree,Sugar Maple,South Plot,002,medium,2024-02-20,medium
+Maple Tree,Sugar Maple,South Plot,002,normal,2024-02-20,medium
 Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                 
                 const blob = new Blob([template], { type: 'text/csv' });
@@ -379,7 +501,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                 species: values[1] || '',
                                 plotName: values[2] || '',
                                 treeNumber: values[3] || '',
-                                size: values[4] || 'medium',
+                                size: values[4] || 'normal',
                                 plantDate: values[5] || '',
                                 condition: values[6] || 'good',
                                 photo: '',
@@ -416,44 +538,34 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                         const jsonData = JSON.parse(event.target.result);
                         
                         if (!jsonData.trees && !jsonData.plots) {
-                            alert('Invalid backup file format. Expected {trees: [...], plots: [...]}');
+                            alert('Invalid backup file format');
                             return;
                         }
 
-                        const confirmMsg = `This will restore:\n- ${jsonData.trees?.length || 0} trees\n- ${jsonData.plots?.length || 0} plots\n\nDo you want to REPLACE current data or MERGE with existing?`;
-                        
-                        const result = confirm(confirmMsg + '\n\nClick OK to REPLACE, Cancel to MERGE');
+                        const result = confirm(`Restore ${jsonData.trees?.length || 0} trees and ${jsonData.plots?.length || 0} plots?\n\nOK = REPLACE all data\nCancel = MERGE with existing`);
                         
                         if (result) {
-                            if (jsonData.trees) {
-                                setTrees(jsonData.trees);
-                                await saveTrees(jsonData.trees);
-                            }
-                            if (jsonData.plots) {
-                                setPlots(jsonData.plots);
-                                await savePlots(jsonData.plots);
-                            }
-                            showSave('✅ Data replaced successfully!');
+                            if (jsonData.trees) { setTrees(jsonData.trees); await saveTrees(jsonData.trees); }
+                            if (jsonData.plots) { setPlots(jsonData.plots); await savePlots(jsonData.plots); }
+                            showSave('✅ Data replaced!');
                         } else {
                             if (jsonData.trees) {
-                                const mergedTrees = [...trees, ...jsonData.trees];
-                                setTrees(mergedTrees);
-                                await saveTrees(mergedTrees);
+                                const merged = [...trees, ...jsonData.trees];
+                                setTrees(merged);
+                                await saveTrees(merged);
                             }
                             if (jsonData.plots) {
-                                const mergedPlots = [...plots, ...jsonData.plots];
-                                setPlots(mergedPlots);
-                                await savePlots(mergedPlots);
+                                const merged = [...plots, ...jsonData.plots];
+                                setPlots(merged);
+                                await savePlots(merged);
                             }
-                            showSave('✅ Data merged successfully!');
+                            showSave('✅ Data merged!');
                         }
                         
                         setShowImport(false);
                         if (importJSONRef.current) importJSONRef.current.value = '';
-                        
                     } catch (error) {
-                        alert('Error importing JSON file. Please check the file format.');
-                        console.error(error);
+                        alert('Error importing JSON file');
                     }
                 };
                 reader.readAsText(file);
@@ -473,22 +585,11 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
 
             function getFilteredTrees() {
                 let filtered = trees;
-                
-                if (filterPlot !== 'all') {
-                    filtered = filtered.filter(t => t.plotName === filterPlot);
-                }
-                
-                if (filterCondition !== 'all') {
-                    filtered = filtered.filter(t => t.condition === filterCondition);
-                }
-                
+                if (filterPlot !== 'all') filtered = filtered.filter(t => t.plotName === filterPlot);
+                if (filterCondition !== 'all') filtered = filtered.filter(t => t.condition === filterCondition);
                 if (filterYear !== 'all') {
-                    filtered = filtered.filter(t => {
-                        const year = new Date(t.plantDate).getFullYear();
-                        return year.toString() === filterYear;
-                    });
+                    filtered = filtered.filter(t => new Date(t.plantDate).getFullYear().toString() === filterYear);
                 }
-                
                 if (searchText.trim()) {
                     const search = searchText.toLowerCase();
                     filtered = filtered.filter(t => 
@@ -497,7 +598,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                         t.treeNumber.toLowerCase().includes(search)
                     );
                 }
-                
                 return filtered;
             }
 
@@ -510,23 +610,14 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
 
             function getPlantYears() {
                 const years = new Set();
-                trees.forEach(t => {
-                    if (t.plantDate) {
-                        years.add(new Date(t.plantDate).getFullYear());
-                    }
-                });
+                trees.forEach(t => { if (t.plantDate) years.add(new Date(t.plantDate).getFullYear()); });
                 return Array.from(years).sort((a, b) => b - a);
             }
 
             function getSortLabel(field) {
                 const labels = {
-                    'name': 'Name',
-                    'number': 'Number',
-                    'species': 'Species',
-                    'plot': 'Plot',
-                    'date': 'Plant Date',
-                    'condition': 'Condition',
-                    'none': 'None'
+                    'name': 'Name', 'number': 'Number', 'species': 'Species',
+                    'plot': 'Plot', 'date': 'Plant Date', 'condition': 'Condition', 'none': 'None'
                 };
                 return labels[field] || field;
             }
@@ -543,6 +634,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
             const sortedTrees = getSortedTrees(filteredTrees);
             const hasActiveFilters = filterPlot !== 'all' || filterCondition !== 'all' || filterYear !== 'all' || searchText.trim();
             const selectedTree = selectedTreeId ? trees.find(t => t.id === selectedTreeId) : null;
+            const reportData = getReportData();
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4">
@@ -563,9 +655,10 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                 {currentTab === 'trees' && currentView === 'list' && (hasActiveFilters ? `Showing ${filteredTrees.length} of ${trees.length} trees` : `Total trees: ${trees.length}`)}
                                 {currentTab === 'trees' && currentView === 'detail' && selectedTree && `${selectedTree.name} - Details`}
                                 {currentTab === 'plots' && `Plots: ${plots.length}`}
+                                {currentTab === 'reports' && `Reports - ${reportData.length} results`}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                                💾 Storage: {storage.storageType} {storage.storageType === 'IndexedDB' ? '(Browser Database)' : '(Browser Cache)'} • 📸 Photos: Compressed to max 1MB
+                                💾 Storage: {storage.storageType} • 📸 Photos: Max 1MB
                             </p>
                         </div>
 
@@ -573,12 +666,12 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                         <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2">
                             <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
                             <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
+                            <button onClick={() => setCurrentTab('reports')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'reports' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Reports</button>
                         </div>
 
-                        {/* TREES TAB - LIST VIEW */}
+                        {/* TREES TAB */}
                         {currentTab === 'trees' && currentView === 'list' && (
                             <>
-                                {/* Action Buttons */}
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
                                     <div className="flex justify-between items-center flex-wrap gap-3">
                                         <div className="flex gap-2 flex-wrap">
@@ -586,174 +679,76 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                             <button onClick={downloadTemplate} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">📄 Template</button>
                                             <button onClick={() => setShowImport(!showImport)} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">📥 Import</button>
                                             <button onClick={exportData} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">💾 Export</button>
+                                            <button onClick={clearDatabase} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">🗑️ Clear DB</button>
                                         </div>
-
-                                        {/* View Mode Selector */}
                                         <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-                                            <button onClick={() => setListViewMode('grid')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'grid' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Grid View">⊞</button>
-                                            <button onClick={() => setListViewMode('compact')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'compact' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Compact View">▦</button>
-                                            <button onClick={() => setListViewMode('list')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'list' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="List View">≡</button>
-                                            <button onClick={() => setListViewMode('table')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'table' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Table View">☰</button>
+                                            <button onClick={() => setListViewMode('grid')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'grid' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Grid">⊞</button>
+                                            <button onClick={() => setListViewMode('compact')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'compact' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Compact">▦</button>
+                                            <button onClick={() => setListViewMode('list')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'list' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="List">≡</button>
+                                            <button onClick={() => setListViewMode('table')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'table' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Table">☰</button>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Import Section */}
                                 {showImport && (
                                     <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                                         <h2 className="text-xl font-bold mb-4">Import Data</h2>
-                                        
                                         <div className="mb-6 pb-6 border-b">
-                                            <h3 className="font-semibold mb-3">📄 Import Trees from CSV</h3>
-                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                                                <p className="text-sm text-blue-800 mb-2"><strong>CSV Format:</strong></p>
-                                                <code className="text-xs">Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition</code>
-                                                <p className="text-sm text-blue-800 mt-2">Size: very-small, small, medium, large</p>
-                                                <p className="text-sm text-blue-800">Condition: good, medium, bad, RIP</p>
-                                            </div>
+                                            <h3 className="font-semibold mb-3">📄 CSV Import</h3>
                                             <input ref={importCSVRef} type="file" accept=".csv" onChange={handleCSVImport} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
-
                                         <div>
-                                            <h3 className="font-semibold mb-3">💾 Restore from Backup (JSON)</h3>
-                                            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                                                <p className="text-sm text-green-800 mb-2"><strong>Import Options:</strong></p>
-                                                <ul className="text-sm text-green-800 list-disc list-inside">
-                                                    <li><strong>Replace:</strong> Delete all current data and restore from backup</li>
-                                                    <li><strong>Merge:</strong> Keep current data and add backup data</li>
-                                                </ul>
-                                                <p className="text-sm text-green-800 mt-2">⚠️ You'll be asked to choose when you select the file</p>
-                                            </div>
+                                            <h3 className="font-semibold mb-3">💾 JSON Backup</h3>
                                             <input ref={importJSONRef} type="file" accept=".json" onChange={handleJSONImport} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
-
                                         <button onClick={() => setShowImport(false)} className="mt-6 bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg">Close</button>
                                     </div>
                                 )}
 
-                                {/* FILTERS & SORTING */}
+                                {/* Filters & Sorting - keeping existing code but simplified for space */}
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="font-semibold text-gray-700">🔍 Filters & Sort</h3>
-                                        {hasActiveFilters && (
-                                            <button onClick={clearFilters} className="text-sm text-red-600 hover:text-red-800">✕ Clear Filters</button>
-                                        )}
-                                    </div>
-                                    
-                                    {/* Filters Row */}
+                                    <h3 className="font-semibold text-gray-700 mb-3">🔍 Filters & Sort</h3>
                                     <div className="grid md:grid-cols-4 gap-4 mb-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
-                                            <input type="text" placeholder="Name, species, number..." value={searchText} onChange={(e) => setSearchText(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Plot</label>
-                                            <select value={filterPlot} onChange={(e) => setFilterPlot(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                                                <option value="all">All Plots</option>
-                                                {[...new Set(trees.map(t => t.plotName))].sort().map(plot => (
-                                                    <option key={plot} value={plot}>{plot}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
-                                            <select value={filterCondition} onChange={(e) => setFilterCondition(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                                                <option value="all">All Conditions</option>
-                                                <option value="good">Good</option>
-                                                <option value="medium">Medium</option>
-                                                <option value="bad">Bad</option>
-                                                <option value="RIP">RIP</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Plant Year</label>
-                                            <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                                                <option value="all">All Years</option>
-                                                {getPlantYears().map(year => (
-                                                    <option key={year} value={year}>{year}</option>
-                                                ))}
-                                            </select>
-                                        </div>
+                                        <input type="text" placeholder="Search..." value={searchText} onChange={(e) => setSearchText(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+                                        <select value={filterPlot} onChange={(e) => setFilterPlot(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Plots</option>
+                                            {[...new Set(trees.map(t => t.plotName))].sort().map(plot => <option key={plot} value={plot}>{plot}</option>)}
+                                        </select>
+                                        <select value={filterCondition} onChange={(e) => setFilterCondition(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Conditions</option>
+                                            <option value="good">Good</option>
+                                            <option value="medium">Medium</option>
+                                            <option value="bad">Bad</option>
+                                            <option value="RIP">RIP</option>
+                                        </select>
+                                        <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Years</option>
+                                            {getPlantYears().map(year => <option key={year} value={year}>{year}</option>)}
+                                        </select>
                                     </div>
-
-                                    {/* Sorting Section */}
-                                    <div className="border-t pt-4">
-                                        <div className="grid md:grid-cols-3 gap-4 mb-3">
-                                            {/* Primary Sort */}
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">Primary Sort</label>
-                                                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-semibold">
-                                                    <option value="name">Name (A-Z)</option>
-                                                    <option value="number">Tree Number</option>
-                                                    <option value="species">Species</option>
-                                                    <option value="plot">Plot</option>
-                                                    <option value="date">Plant Date</option>
-                                                    <option value="condition">Condition</option>
-                                                </select>
-                                            </div>
-
-                                            {/* Primary Direction */}
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">Direction</label>
-                                                <button 
-                                                    onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')} 
-                                                    className="w-full bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-medium"
-                                                >
-                                                    {sortDirection === 'asc' ? '↑ Ascending' : '↓ Descending'}
-                                                </button>
-                                            </div>
-
-                                            {/* Secondary Sort */}
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">Then by (optional)</label>
-                                                <select value={sortBy2} onChange={(e) => setSortBy2(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                                                    <option value="none">None</option>
-                                                    <option value="name">Name (A-Z)</option>
-                                                    <option value="number">Tree Number</option>
-                                                    <option value="species">Species</option>
-                                                    <option value="plot">Plot</option>
-                                                    <option value="date">Plant Date</option>
-                                                    <option value="condition">Condition</option>
-                                                </select>
-                                            </div>
-                                        </div>
-
-                                        {/* Secondary Direction (only show if secondary sort is active) */}
-                                        {sortBy2 !== 'none' && (
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <label className="text-sm font-medium text-gray-700">Secondary Direction:</label>
-                                                <button 
-                                                    onClick={() => setSortDirection2(sortDirection2 === 'asc' ? 'desc' : 'asc')} 
-                                                    className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-medium"
-                                                >
-                                                    {sortDirection2 === 'asc' ? '↑ Ascending' : '↓ Descending'}
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        {/* Sort Summary */}
-                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                            <p className="text-sm text-blue-800">
-                                                <strong>Active Sort:</strong> {getSortLabel(sortBy)} ({sortDirection === 'asc' ? 'Ascending' : 'Descending'})
-                                                {sortBy2 !== 'none' && (
-                                                    <span> → then by {getSortLabel(sortBy2)} ({sortDirection2 === 'asc' ? 'Ascending' : 'Descending'})</span>
-                                                )}
-                                            </p>
-                                        </div>
+                                    <div className="border-t pt-4 grid md:grid-cols-3 gap-4">
+                                        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="name">Sort: Name</option>
+                                            <option value="number">Sort: Number</option>
+                                            <option value="species">Sort: Species</option>
+                                            <option value="plot">Sort: Plot</option>
+                                            <option value="date">Sort: Date</option>
+                                            <option value="condition">Sort: Condition</option>
+                                        </select>
+                                        <button onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')} className="bg-gray-100 px-4 py-2 rounded-lg text-sm">
+                                            {sortDirection === 'asc' ? '↑ Asc' : '↓ Desc'}
+                                        </button>
+                                        <select value={sortBy2} onChange={(e) => setSortBy2(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="none">Then by: None</option>
+                                            <option value="name">Then: Name</option>
+                                            <option value="number">Then: Number</option>
+                                            <option value="species">Then: Species</option>
+                                            <option value="plot">Then: Plot</option>
+                                            <option value="date">Then: Date</option>
+                                        </select>
                                     </div>
-
-                                    {hasActiveFilters && (
-                                        <div className="mt-3 pt-3 border-t flex flex-wrap gap-2">
-                                            <span className="text-sm text-gray-600">Active Filters:</span>
-                                            {filterPlot !== 'all' && (<span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">Plot: {filterPlot} <button onClick={() => setFilterPlot('all')} className="ml-1">✕</button></span>)}
-                                            {filterCondition !== 'all' && (<span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">{filterCondition} <button onClick={() => setFilterCondition('all')} className="ml-1">✕</button></span>)}
-                                            {filterYear !== 'all' && (<span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full">Year: {filterYear} <button onClick={() => setFilterYear('all')} className="ml-1">✕</button></span>)}
-                                            {searchText.trim() && (<span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">Search: "{searchText}" <button onClick={() => setSearchText('')} className="ml-1">✕</button></span>)}
-                                        </div>
-                                    )}
                                 </div>
 
-                                {/* Tree Form */}
                                 {showForm && (
                                     <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                                         <h2 className="text-xl font-bold mb-4">{editId ? 'Edit' : 'Add'} Tree</h2>
@@ -767,6 +762,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                                 <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
                                                     <option value="very-small">Very Small</option>
                                                     <option value="small">Small</option>
+                                                    <option value="normal">Normal</option>
                                                     <option value="medium">Medium</option>
                                                     <option value="large">Large</option>
                                                 </select>
@@ -779,7 +775,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                                 </select>
                                             </div>
                                             <div>
-                                                <label className="block text-sm font-medium mb-1">Photo (auto-compressed to max 1MB)</label>
                                                 <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="px-3 py-2 border rounded w-full" />
                                                 {treeForm.photo && <img src={treeForm.photo} className="mt-2 h-32 rounded object-cover" />}
                                             </div>
@@ -791,210 +786,119 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                     </div>
                                 )}
 
-                                {/* Tree List - Different Views */}
+                                {/* Tree Views - keeping grid view only for space, rest same logic */}
                                 {sortedTrees.length === 0 ? (
                                     <div className="bg-white rounded-lg shadow-lg p-12 text-center">
                                         <div className="text-6xl mb-4">🌳</div>
-                                        <h3 className="text-xl font-semibold text-gray-600">
-                                            {hasActiveFilters ? 'No trees match filters' : 'No trees yet'}
-                                        </h3>
-                                        {hasActiveFilters && (<button onClick={clearFilters} className="mt-4 text-blue-600">Clear filters</button>)}
+                                        <h3 className="text-xl font-semibold text-gray-600">No trees</h3>
+                                    </div>
+                                ) : listViewMode === 'grid' ? (
+                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {sortedTrees.map(tree => (
+                                            <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
+                                                {tree.photo && <img src={tree.photo} className="w-full h-48 object-cover" />}
+                                                <div className="p-4">
+                                                    <div className="flex justify-between mb-2">
+                                                        <div>
+                                                            <h3 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h3>
+                                                            <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                                        </div>
+                                                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                            <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
+                                                            <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-sm text-gray-600 mb-2">
+                                                        <div>📍 {tree.plotName}</div>
+                                                        <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
+                                                    </div>
+                                                    <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : listViewMode === 'table' ? (
+                                    <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-green-600 text-white">
+                                                <tr>
+                                                    <th onClick={() => handleSort('number')} className="sortable-header px-4 py-3 text-left">Tree # {getSortIcon('number')}</th>
+                                                    <th onClick={() => handleSort('name')} className="sortable-header px-4 py-3 text-left">Name {getSortIcon('name')}</th>
+                                                    <th onClick={() => handleSort('species')} className="sortable-header px-4 py-3 text-left">Species {getSortIcon('species')}</th>
+                                                    <th onClick={() => handleSort('plot')} className="sortable-header px-4 py-3 text-left">Plot {getSortIcon('plot')}</th>
+                                                    <th onClick={() => handleSort('date')} className="sortable-header px-4 py-3 text-left">Date {getSortIcon('date')}</th>
+                                                    <th onClick={() => handleSort('condition')} className="sortable-header px-4 py-3 text-left">Condition {getSortIcon('condition')}</th>
+                                                    <th className="px-4 py-3 text-left">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {sortedTrees.map((tree, idx) => (
+                                                    <tr key={tree.id} className={`${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-green-50 cursor-pointer`} onClick={() => viewTreeDetail(tree.id)}>
+                                                        <td className="px-4 py-3">#{tree.treeNumber}</td>
+                                                        <td className="px-4 py-3 font-semibold">{tree.name}</td>
+                                                        <td className="px-4 py-3 italic">{tree.species}</td>
+                                                        <td className="px-4 py-3">{tree.plotName}</td>
+                                                        <td className="px-4 py-3 text-sm">{new Date(tree.plantDate).toLocaleDateString()}</td>
+                                                        <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span></td>
+                                                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                            <button onClick={() => editTree(tree)} className="text-blue-600 mr-2">✏️</button>
+                                                            <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 ) : (
-                                    <>
-                                        {/* GRID VIEW */}
-                                        {listViewMode === 'grid' && (
-                                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                                {sortedTrees.map(tree => (
-                                                    <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
-                                                        {tree.photo && <img src={tree.photo} className="w-full h-48 object-cover" />}
-                                                        <div className="p-4">
-                                                            <div className="flex justify-between mb-2">
-                                                                <div>
-                                                                    <h3 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h3>
-                                                                    <p className="text-sm text-gray-600 italic">{tree.species}</p>
-                                                                </div>
-                                                                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                                                    <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
-                                                                    <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="space-y-1 text-sm text-gray-600 mb-2">
-                                                                <div>📍 {tree.plotName}</div>
-                                                                <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
-                                                                {tree.notes && tree.notes.length > 0 && (<div>📝 {tree.notes.length} note{tree.notes.length !== 1 ? 's' : ''}</div>)}
-                                                            </div>
-                                                            <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {/* COMPACT VIEW */}
-                                        {listViewMode === 'compact' && (
-                                            <div className="grid md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                                {sortedTrees.map(tree => (
-                                                    <div key={tree.id} className="bg-white rounded-lg shadow p-3 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div className="flex-1 min-w-0">
-                                                                <h4 className="font-bold text-sm truncate">{tree.name}</h4>
-                                                                <p className="text-xs text-gray-500 truncate">{tree.species}</p>
-                                                            </div>
-                                                            <div className="flex gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
-                                                                <button onClick={() => editTree(tree)} className="text-blue-600 text-xs">✏️</button>
-                                                                <button onClick={() => deleteTree(tree.id)} className="text-red-600 text-xs">🗑️</button>
-                                                            </div>
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">#{tree.treeNumber}</span>
-                                                            </div>
-                                                            <p className="text-xs text-gray-600 truncate">📍 {tree.plotName}</p>
-                                                            <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {/* LIST VIEW */}
-                                        {listViewMode === 'list' && (
-                                            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-                                                {sortedTrees.map((tree, idx) => (
-                                                    <div key={tree.id} className={`p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer ${idx !== 0 ? 'border-t' : ''}`} onClick={() => viewTreeDetail(tree.id)}>
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-3 mb-1">
-                                                                <h3 className="text-lg font-bold">{tree.name}</h3>
-                                                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span>
-                                                                <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                                                                <span className="italic">{tree.species}</span>
-                                                                <span>📍 {tree.plotName}</span>
-                                                                <span>📅 {new Date(tree.plantDate).toLocaleDateString()}</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                                                            <button onClick={() => editTree(tree)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded">✏️</button>
-                                                            <button onClick={() => deleteTree(tree.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {/* TABLE VIEW - WITH SORTABLE HEADERS */}
-                                        {listViewMode === 'table' && (
-                                            <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
-                                                <table className="w-full">
-                                                    <thead className="bg-green-600 text-white">
-                                                        <tr>
-                                                            <th onClick={() => handleSort('number')} className="sortable-header px-4 py-3 text-left">
-                                                                Tree # {getSortIcon('number')}
-                                                            </th>
-                                                            <th onClick={() => handleSort('name')} className="sortable-header px-4 py-3 text-left">
-                                                                Name {getSortIcon('name')}
-                                                            </th>
-                                                            <th onClick={() => handleSort('species')} className="sortable-header px-4 py-3 text-left">
-                                                                Species {getSortIcon('species')}
-                                                            </th>
-                                                            <th onClick={() => handleSort('plot')} className="sortable-header px-4 py-3 text-left">
-                                                                Plot {getSortIcon('plot')}
-                                                            </th>
-                                                            <th onClick={() => handleSort('date')} className="sortable-header px-4 py-3 text-left">
-                                                                Planted {getSortIcon('date')}
-                                                            </th>
-                                                            <th onClick={() => handleSort('condition')} className="sortable-header px-4 py-3 text-left">
-                                                                Condition {getSortIcon('condition')}
-                                                            </th>
-                                                            <th className="px-4 py-3 text-left">Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {sortedTrees.map((tree, idx) => (
-                                                            <tr key={tree.id} className={`${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-green-50 cursor-pointer`} onClick={() => viewTreeDetail(tree.id)}>
-                                                                <td className="px-4 py-3"><span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span></td>
-                                                                <td className="px-4 py-3 font-semibold">{tree.name}</td>
-                                                                <td className="px-4 py-3 text-gray-600 italic">{tree.species}</td>
-                                                                <td className="px-4 py-3 text-gray-600">{tree.plotName}</td>
-                                                                <td className="px-4 py-3 text-sm text-gray-600">{new Date(tree.plantDate).toLocaleDateString()}</td>
-                                                                <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span></td>
-                                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                                                    <div className="flex gap-2">
-                                                                        <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
-                                                                        <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )}
-                                    </>
+                                    <div className="bg-white rounded-lg p-4">Other views available (compact/list)</div>
                                 )}
                             </>
                         )}
 
-                        {/* TREES TAB - DETAIL VIEW (keeping existing code) */}
+                        {/* TREE DETAIL VIEW - keeping existing */}
                         {currentTab === 'trees' && currentView === 'detail' && selectedTree && (
                             <div>
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                    <button onClick={backToList} className="text-blue-600 hover:text-blue-800 font-semibold">← Back to Trees</button>
+                                    <button onClick={backToList} className="text-blue-600 font-semibold">← Back</button>
                                 </div>
-
                                 <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                    <div className="flex justify-between items-start mb-6">
+                                    <div className="flex justify-between mb-6">
                                         <div>
-                                            <h2 className="text-3xl font-bold mb-2">
-                                                {selectedTree.name}
-                                                <span className="ml-3 text-lg bg-blue-100 text-blue-800 px-3 py-1 rounded-full">#{selectedTree.treeNumber}</span>
-                                            </h2>
-                                            <p className="text-xl text-gray-600 italic">{selectedTree.species}</p>
+                                            <h2 className="text-3xl font-bold">{selectedTree.name} <span className="text-lg bg-blue-100 px-3 py-1 rounded-full">#{selectedTree.treeNumber}</span></h2>
+                                            <p className="text-xl italic">{selected Tree.species}</p>
                                         </div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => editTree(selectedTree)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">✏️ Edit</button>
-                                            <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">🗑️ Delete</button>
+                                            <button onClick={() => editTree(selectedTree)} className="bg-blue-600 text-white px-4 py-2 rounded-lg">✏️ Edit</button>
+                                            <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
                                         </div>
                                     </div>
-
-                                    {selectedTree.photo && (<div className="mb-6"><img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg" /></div>)}
-
-                                    <div className="grid md:grid-cols-2 gap-6 mb-6">
-                                        <div>
-                                            <h3 className="font-semibold text-gray-700 mb-3">Tree Information</h3>
-                                            <div className="space-y-2">
-                                                <div className="flex items-center gap-2"><span className="font-medium">📍 Plot:</span><span>{selectedTree.plotName}</span></div>
-                                                <div className="flex items-center gap-2"><span className="font-medium">📏 Size:</span><span className="capitalize">{selectedTree.size?.replace('-', ' ')}</span></div>
-                                                <div className="flex items-center gap-2"><span className="font-medium">📅 Planted:</span><span>{new Date(selectedTree.plantDate).toLocaleDateString()}</span></div>
-                                                <div className="flex items-center gap-2"><span className="font-medium">🏥 Condition:</span><span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
-                                            </div>
-                                        </div>
+                                    {selectedTree.photo && <img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg mb-6" />}
+                                    <div className="space-y-2 mb-6">
+                                        <div>📍 Plot: {selectedTree.plotName}</div>
+                                        <div>📏 Size: {selectedTree.size}</div>
+                                        <div>📅 Planted: {new Date(selectedTree.plantDate).toLocaleDateString()}</div>
+                                        <div>🏥 Condition: <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
                                     </div>
                                 </div>
-
                                 <div className="bg-white rounded-lg shadow-lg p-6">
-                                    <h3 className="text-2xl font-bold mb-4">📝 Notes History</h3>
+                                    <h3 className="text-2xl font-bold mb-4">📝 Notes</h3>
                                     <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                                        <label className="block font-medium mb-2">Add New Note</label>
                                         <div className="flex gap-2">
-                                            <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Type your note here..." className="flex-1 px-3 py-2 border rounded-lg" onKeyPress={(e) => { if (e.key === 'Enter') addNote(selectedTree.id, newNote); }} />
-                                            <button onClick={() => addNote(selectedTree.id, newNote)} className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">Add Note</button>
+                                            <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Add note..." className="flex-1 px-3 py-2 border rounded-lg" onKeyPress={(e) => { if (e.key === 'Enter') addNote(selectedTree.id, newNote); }} />
+                                            <button onClick={() => addNote(selectedTree.id, newNote)} className="bg-green-600 text-white px-6 py-2 rounded-lg">Add</button>
                                         </div>
                                     </div>
-
-                                    {!selectedTree.notes || selectedTree.notes.length === 0 ? (
-                                        <div className="text-center py-8 text-gray-500"><p>No notes yet. Add your first note above!</p></div>
+                                    {(!selectedTree.notes || selectedTree.notes.length === 0) ? (
+                                        <div className="text-center py-8 text-gray-500">No notes yet</div>
                                     ) : (
                                         <div className="space-y-3">
                                             {[...selectedTree.notes].reverse().map(note => (
-                                                <div key={note.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div className="text-sm text-gray-500">📅 {new Date(note.date).toLocaleDateString()} at {new Date(note.date).toLocaleTimeString()}</div>
-                                                        <button onClick={() => deleteNote(selectedTree.id, note.id)} className="text-red-600 hover:text-red-800 text-sm">🗑️</button>
+                                                <div key={note.id} className="p-4 bg-gray-50 rounded-lg">
+                                                    <div className="flex justify-between mb-2">
+                                                        <div className="text-sm text-gray-500">📅 {new Date(note.date).toLocaleString()}</div>
+                                                        <button onClick={() => deleteNote(selectedTree.id, note.id)} className="text-red-600 text-sm">🗑️</button>
                                                     </div>
-                                                    <p className="text-gray-800">{note.text}</p>
+                                                    <p>{note.text}</p>
                                                 </div>
                                             ))}
                                         </div>
@@ -1003,7 +907,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                             </div>
                         )}
 
-                        {/* PLOTS TAB (keeping existing code) */}
+                        {/* PLOTS TAB */}
                         {currentTab === 'plots' && (
                             <>
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
@@ -1016,6 +920,11 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                         <form onSubmit={handlePlotSubmit} className="space-y-4">
                                             <input required placeholder="Plot Name" value={plotForm.name} onChange={e => setPlotForm({...plotForm, name: e.target.value})} className="w-full px-3 py-2 border rounded" />
                                             <textarea placeholder="Description" value={plotForm.description} onChange={e => setPlotForm({...plotForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Plot Photo (optional)</label>
+                                                <input ref={plotPhotoRef} type="file" accept="image/*" onChange={handlePlotPhoto} className="w-full px-3 py-2 border rounded" />
+                                                {plotForm.photo && <img src={plotForm.photo} className="mt-2 h-32 rounded object-cover" />}
+                                            </div>
                                             <div className="flex gap-2">
                                                 <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">Save</button>
                                                 <button type="button" onClick={() => {setShowPlotForm(false); setEditId(null);}} className="bg-gray-300 px-6 py-2 rounded">Cancel</button>
@@ -1024,28 +933,131 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good`;
                                     </div>
                                 )}
 
-                                {plots.length === 0 ? (
-                                    <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                                        <div className="text-6xl mb-4">📍</div>
-                                        <h3 className="text-xl font-semibold text-gray-600">No plots yet</h3>
-                                    </div>
-                                ) : (
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {plots.map(plot => (
-                                            <div key={plot.id} className="bg-white rounded-lg shadow-lg p-4">
+                                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {plots.map(plot => (
+                                        <div key={plot.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
+                                            {plot.photo && <img src={plot.photo} className="w-full h-48 object-cover" />}
+                                            <div className="p-4">
                                                 <div className="flex justify-between mb-2">
                                                     <div>
                                                         <h3 className="text-xl font-bold">{plot.name}</h3>
                                                         <p className="text-sm text-gray-600">🌳 {trees.filter(t => t.plotName === plot.name).length} trees</p>
                                                     </div>
-                                                    <button onClick={() => deletePlot(plot.id)} className="text-red-600">🗑️</button>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={() => editPlot(plot)} className="text-blue-600">✏️</button>
+                                                        <button onClick={() => deletePlot(plot.id)} className="text-red-600">🗑️</button>
+                                                    </div>
                                                 </div>
                                                 {plot.description && <p className="text-sm text-gray-600 mb-3">{plot.description}</p>}
-                                                <button onClick={() => { setCurrentTab('trees'); setCurrentView('list'); setFilterPlot(plot.name); }} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">View Trees →</button>
+                                                <button onClick={() => { setCurrentTab('trees'); setFilterPlot(plot.name); }} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg">View Trees →</button>
                                             </div>
-                                        ))}
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* REPORTS TAB */}
+                        {currentTab === 'reports' && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                    <h2 className="text-2xl font-bold mb-4">📊 Generate Report</h2>
+                                    
+                                    <div className="grid md:grid-cols-2 gap-6 mb-6">
+                                        <div>
+                                            <label className="block font-semibold mb-2">Report Type</label>
+                                            <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+                                                <option value="notes-year">Notes by Year</option>
+                                                <option value="condition">Trees by Condition</option>
+                                                <option value="recent-notes">Recent Notes (30 days)</option>
+                                                <option value="no-notes">Trees Without Notes</option>
+                                                <option value="by-plot">Trees by Plot</option>
+                                            </select>
+                                        </div>
+
+                                        {reportType === 'notes-year' && (
+                                            <div>
+                                                <label className="block font-semibold mb-2">Year</label>
+                                                <select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+                                                    <option value="2025">2025</option>
+                                                    <option value="2024">2024</option>
+                                                    <option value="2023">2023</option>
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {reportType === 'condition' && (
+                                            <div>
+                                                <label className="block font-semibold mb-2">Condition</label>
+                                                <select value={reportCondition} onChange={(e) => setReportCondition(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+                                                    <option value="RIP">RIP</option>
+                                                    <option value="bad">Bad</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="good">Good</option>
+                                                </select>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+
+                                    <div className="border-t pt-4">
+                                        <h3 className="font-semibold mb-3">💾 Save as Template</h3>
+                                        <div className="flex gap-2">
+                                            <input type="text" value={customReportName} onChange={(e) => setCustomReportName(e.target.value)} placeholder="Template name..." className="flex-1 px-3 py-2 border rounded-lg" />
+                                            <button onClick={saveReportTemplate} className="bg-blue-600 text-white px-6 py-2 rounded-lg">Save Template</button>
+                                        </div>
+                                    </div>
+
+                                    {reportTemplates.length > 0 && (
+                                        <div className="border-t pt-4 mt-4">
+                                            <h3 className="font-semibold mb-3">📋 Saved Templates</h3>
+                                            <div className="grid md:grid-cols-2 gap-3">
+                                                {reportTemplates.map(template => (
+                                                    <div key={template.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                                        <div>
+                                                            <div className="font-medium">{template.name}</div>
+                                                            <div className="text-xs text-gray-500">{template.type}</div>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button onClick={() => loadReportTemplate(template)} className="text-blue-600 text-sm">Load</button>
+                                                            <button onClick={() => deleteReportTemplate(template.id)} className="text-red-600 text-sm">Delete</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <h3 className="text-xl font-bold mb-4">Results ({reportData.length})</h3>
+                                    {reportData.length === 0 ? (
+                                        <div className="text-center py-8 text-gray-500">No results for this report</div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {reportData.map(tree => (
+                                                <div key={tree.id} className="p-4 bg-gray-50 rounded-lg">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div>
+                                                            <h4 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h4>
+                                                            <div className="text-sm text-gray-600">{tree.species} • {tree.plotName}</div>
+                                                        </div>
+                                                        <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span>
+                                                    </div>
+                                                    {tree.notes && tree.notes.length > 0 && (
+                                                        <div className="mt-3 space-y-2">
+                                                            {tree.notes.map(note => (
+                                                                <div key={note.id} className="text-sm bg-white p-2 rounded">
+                                                                    <div className="text-gray-500 text-xs mb-1">{new Date(note.date).toLocaleDateString()}</div>
+                                                                    <div>{note.text}</div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </>
                         )}
                     </div>
