@@ -664,12 +664,10 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                         </div>
 
                         {/* Tabs */}
-                        <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2 flex-wrap">
-                            <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-4 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
-                            <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-4 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
-                            <button onClick={() => setCurrentTab('reports')} className={`flex-1 px-4 py-3 rounded-lg font-semibold ${currentTab === 'reports' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Reports</button>
-                            <button onClick={() => setCurrentTab('help')} className={`px-4 py-3 rounded-lg font-semibold ${currentTab === 'help' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>❓ Help</button>
-                            <button onClick={() => setCurrentTab('about')} className={`px-4 py-3 rounded-lg font-semibold ${currentTab === 'about' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>ℹ️ About</button>
+                        <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2">
+                            <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
+                            <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
+                            <button onClick={() => setCurrentTab('reports')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'reports' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Reports</button>
                         </div>
 
                         {/* TREES TAB */}
