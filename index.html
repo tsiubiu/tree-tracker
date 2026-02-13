@@ -176,7 +176,7 @@
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
             const [reportTemplates, setReportTemplates] = useState([]);
-            const [currentTab, setCurrentTab] = useState('trees');
+            const [currentTab, setCurrentTab] = useState('dashboard');
             const [currentView, setCurrentView] = useState('list');
             const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'list', 'table', 'thumbnails'
             const [selectedTreeId, setSelectedTreeId] = useState(null);
@@ -188,6 +188,7 @@
             const [saveMsg, setSaveMsg] = useState('');
             const [loading, setLoading] = useState(true);
             const [newNote, setNewNote] = useState('');
+            const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
             
             const [filterPlot, setFilterPlot] = useState('all');
             const [filterCondition, setFilterCondition] = useState('all');
@@ -207,7 +208,7 @@
             
             const [treeForm, setTreeForm] = useState({
                 name: '', species: '', plotName: '', treeNumber: '',
-                size: 'normal', plantDate: '', condition: 'good', photo: '', description: '', notes: []
+                size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []
             });
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
@@ -234,7 +235,33 @@
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
                     const rt = await storage.get('report-templates');
-                    if (td) setTrees(JSON.parse(td));
+                    
+                    // Migrate old photo field to photos array
+                    if (td) {
+                        const parsedTrees = JSON.parse(td);
+                        const migratedTrees = parsedTrees.map(tree => {
+                            if (tree.photo && !tree.photos) {
+                                return {
+                                    ...tree,
+                                    photos: [{ 
+                                        id: Date.now().toString() + Math.random(), 
+                                        data: tree.photo, 
+                                        date: tree.plantDate || new Date().toISOString(),
+                                        caption: '',
+                                        isPrimary: true 
+                                    }],
+                                    photo: undefined
+                                };
+                            }
+                            if (!tree.photos) tree.photos = [];
+                            return tree;
+                        });
+                        setTrees(migratedTrees);
+                        if (parsedTrees.some(t => t.photo)) {
+                            await saveTrees(migratedTrees);
+                        }
+                    }
+                    
                     if (pd) setPlots(JSON.parse(pd));
                     if (rt) setReportTemplates(JSON.parse(rt));
                     console.log('Loaded:', { trees: td ? JSON.parse(td).length : 0, plots: pd ? JSON.parse(pd).length : 0 });
@@ -298,7 +325,7 @@
             }
 
             function resetTreeForm() {
-                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photo: '', description: '', notes: []});
+                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
                 setDetailViewMode('view');
@@ -331,9 +358,61 @@
                 const file = e.target.files[0];
                 if (file) {
                     const compressed = await compressImage(file, 1);
-                    setTreeForm({...treeForm, photo: compressed});
-                    showSave('✅ Photo compressed to max 1MB!');
+                    const newPhoto = {
+                        id: Date.now().toString() + Math.random(),
+                        data: compressed,
+                        date: new Date().toISOString(),
+                        caption: '',
+                        isPrimary: treeForm.photos.length === 0
+                    };
+                    setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
+                    showSave('✅ Photo added!');
                 }
+            }
+
+            async function captureFromCamera(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const compressed = await compressImage(file, 1);
+                    const newPhoto = {
+                        id: Date.now().toString() + Math.random(),
+                        data: compressed,
+                        date: new Date().toISOString(),
+                        caption: '📷 Camera',
+                        isPrimary: treeForm.photos.length === 0
+                    };
+                    setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
+                    showSave('✅ Photo captured!');
+                }
+            }
+
+            function removePhoto(photoId) {
+                const updated = treeForm.photos.filter(p => p.id !== photoId);
+                if (updated.length > 0 && !updated.some(p => p.isPrimary)) {
+                    updated[0].isPrimary = true;
+                }
+                setTreeForm({...treeForm, photos: updated});
+            }
+
+            function setPrimaryPhoto(photoId) {
+                const updated = treeForm.photos.map(p => ({
+                    ...p,
+                    isPrimary: p.id === photoId
+                }));
+                setTreeForm({...treeForm, photos: updated});
+            }
+
+            function updatePhotoCaption(photoId, caption) {
+                const updated = treeForm.photos.map(p => 
+                    p.id === photoId ? {...p, caption} : p
+                );
+                setTreeForm({...treeForm, photos: updated});
+            }
+
+            function getPrimaryPhoto(tree) {
+                if (!tree.photos || tree.photos.length === 0) return null;
+                const primary = tree.photos.find(p => p.isPrimary);
+                return primary ? primary.data : tree.photos[0].data;
             }
 
             async function handlePlotPhoto(e) {
@@ -408,6 +487,7 @@
                 setSelectedTreeId(treeId);
                 setCurrentView('detail');
                 setDetailViewMode('view');
+                setSelectedPhotoIndex(0);
             }
 
             function backToList() {
@@ -902,8 +982,44 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 />
                                             </div>
                                             <div>
-                                                <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="px-3 py-2 border rounded w-full" />
-                                                {treeForm.photo && <img src={treeForm.photo} className="mt-2 h-32 rounded object-cover" />}
+                                                <label className="block text-sm font-medium mb-2">Photos (max 1MB each) - {treeForm.photos.length}/10</label>
+                                                
+                                                <div className="flex gap-2 mb-3">
+                                                    <label className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 text-center">
+                                                        📷 Take Photo
+                                                        <input type="file" accept="image/*" capture="environment" onChange={captureFromCamera} className="hidden" />
+                                                    </label>
+                                                    <label className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-green-700 text-center">
+                                                        🖼️ Upload Photo
+                                                        <input type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
+                                                    </label>
+                                                </div>
+                                                
+                                                {treeForm.photos.length > 0 && (
+                                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                                        {treeForm.photos.map((photo, idx) => (
+                                                            <div key={photo.id} className="relative group">
+                                                                <img src={photo.data} className="w-full h-24 object-cover rounded border-2" style={{borderColor: photo.isPrimary ? '#10b981' : '#e5e7eb'}} />
+                                                                {photo.isPrimary && (
+                                                                    <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
+                                                                )}
+                                                                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {!photo.isPrimary && (
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded" title="Set as primary">★</button>
+                                                                    )}
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
+                                                                </div>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Caption..."
+                                                                    value={photo.caption}
+                                                                    onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
+                                                                    className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex gap-2">
                                                 <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">Save</button>
@@ -923,10 +1039,15 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                     <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3">
                                         {sortedTrees.map(tree => (
                                             <div key={tree.id} className="relative aspect-square bg-white rounded-lg shadow hover:shadow-lg cursor-pointer overflow-hidden group" onClick={() => viewTreeDetail(tree.id)}>
-                                                {tree.photo ? (
-                                                    <img src={tree.photo} className="w-full h-full object-cover" alt={tree.name} />
+                                                {getPrimaryPhoto(tree) ? (
+                                                    <img src={getPrimaryPhoto(tree)} className="w-full h-full object-cover" alt={tree.name} />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center bg-gray-100 text-4xl">🌳</div>
+                                                )}
+                                                {tree.photos && tree.photos.length > 1 && (
+                                                    <div className="absolute top-1 left-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded-full">
+                                                        {tree.photos.length}
+                                                    </div>
                                                 )}
                                                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                                                     <div className="text-white text-xs font-semibold truncate">{tree.name}</div>
@@ -943,7 +1064,16 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                                         {sortedTrees.map(tree => (
                                             <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
-                                                {tree.photo && <img src={tree.photo} className="w-full h-48 object-cover" />}
+                                                {getPrimaryPhoto(tree) && (
+                                                    <div className="relative">
+                                                        <img src={getPrimaryPhoto(tree)} className="w-full h-48 object-cover" />
+                                                        {tree.photos && tree.photos.length > 1 && (
+                                                            <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full">
+                                                                📸 {tree.photos.length}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                                 <div className="p-4">
                                                     <div className="flex justify-between mb-2">
                                                         <div>
@@ -1084,9 +1214,44 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <textarea placeholder="Additional details..." value={treeForm.description} onChange={e => setTreeForm({...treeForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
                                             </div>
                                             <div>
-                                                <label className="block text-sm font-medium mb-1">Photo (auto-compressed to max 1MB)</label>
-                                                <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="px-3 py-2 border rounded w-full" />
-                                                {treeForm.photo && <img src={treeForm.photo} className="mt-2 h-32 rounded object-cover" />}
+                                                <label className="block text-sm font-medium mb-2">Photos (max 1MB each) - {treeForm.photos.length}/10</label>
+                                                
+                                                <div className="flex gap-2 mb-3">
+                                                    <label className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 text-center">
+                                                        📷 Take Photo
+                                                        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={captureFromCamera} className="hidden" />
+                                                    </label>
+                                                    <label className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-green-700 text-center">
+                                                        🖼️ Upload Photo
+                                                        <input type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
+                                                    </label>
+                                                </div>
+                                                
+                                                {treeForm.photos.length > 0 && (
+                                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                                        {treeForm.photos.map((photo, idx) => (
+                                                            <div key={photo.id} className="relative group">
+                                                                <img src={photo.data} className="w-full h-24 object-cover rounded border-2" style={{borderColor: photo.isPrimary ? '#10b981' : '#e5e7eb'}} />
+                                                                {photo.isPrimary && (
+                                                                    <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
+                                                                )}
+                                                                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {!photo.isPrimary && (
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded" title="Set as primary">★</button>
+                                                                    )}
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
+                                                                </div>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Caption..."
+                                                                    value={photo.caption}
+                                                                    onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
+                                                                    className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex gap-2">
                                                 <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">💾 Save Changes</button>
@@ -1107,7 +1272,39 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
                                             </div>
                                         </div>
-                                        {selectedTree.photo && <img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg mb-6" />}
+                                        {selectedTree.photos && selectedTree.photos.length > 0 && (
+                                            <div className="mb-6">
+                                                <img src={selectedTree.photos[selectedPhotoIndex]?.data || selectedTree.photos[0].data} className="w-full max-h-96 object-cover rounded-lg mb-3" />
+                                                {selectedTree.photos.length > 1 && (
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : selectedTree.photos.length - 1)} 
+                                                            className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
+                                                        >←</button>
+                                                        <div className="flex-1 flex gap-2 overflow-x-auto">
+                                                            {selectedTree.photos.map((photo, idx) => (
+                                                                <img 
+                                                                    key={photo.id} 
+                                                                    src={photo.data} 
+                                                                    onClick={() => setSelectedPhotoIndex(idx)}
+                                                                    className={`h-16 w-16 object-cover rounded cursor-pointer border-2 ${idx === selectedPhotoIndex ? 'border-green-600' : 'border-gray-300'}`}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                        <button 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev < selectedTree.photos.length - 1 ? prev + 1 : 0)} 
+                                                            className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
+                                                        >→</button>
+                                                    </div>
+                                                )}
+                                                {selectedTree.photos[selectedPhotoIndex]?.caption && (
+                                                    <div className="mt-2 text-sm text-gray-600 italic">{selectedTree.photos[selectedPhotoIndex].caption}</div>
+                                                )}
+                                                <div className="mt-1 text-xs text-gray-500">
+                                                    Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length} • {new Date(selectedTree.photos[selectedPhotoIndex]?.date || Date.now()).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="space-y-2 mb-6">
                                             <div>📍 Plot: {selectedTree.plotName}</div>
                                             <div>📏 Size: {selectedTree.size}</div>
