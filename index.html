@@ -83,23 +83,34 @@
                             const tx = this.db.transaction(['data'], 'readwrite');
                             const req = tx.objectStore('data').put({ key, value });
                             req.onsuccess = () => {
-                                console.log(`Saved to IndexedDB: ${key}`);
+                                console.log(`Saved to IndexedDB: ${key} (${Math.round(value.length/1024)}KB)`);
                                 resolve(true);
                             };
                             req.onerror = (err) => { 
-                                console.warn('IndexedDB set failed, using localStorage', err);
-                                localStorage.setItem(key, value); 
-                                resolve(true); 
+                                console.warn('IndexedDB set failed, trying localStorage', err);
+                                try {
+                                    localStorage.setItem(key, value);
+                                    console.log(`Saved to localStorage: ${key}`);
+                                    resolve(true);
+                                } catch (quotaError) {
+                                    console.error('Storage quota exceeded:', quotaError);
+                                    reject(new Error('Storage quota exceeded. Try exporting and removing some photos to reduce size.'));
+                                }
                             };
                         });
                     }
-                    localStorage.setItem(key, value);
-                    console.log(`Saved to localStorage: ${key}`);
-                    return true;
+                    // Try localStorage
+                    try {
+                        localStorage.setItem(key, value);
+                        console.log(`Saved to localStorage: ${key} (${Math.round(value.length/1024)}KB)`);
+                        return true;
+                    } catch (quotaError) {
+                        console.error('localStorage quota exceeded:', quotaError);
+                        throw new Error('Storage quota exceeded. Your data is too large. Try removing some photos.');
+                    }
                 } catch (e) { 
                     console.error('Storage set error:', e);
-                    localStorage.setItem(key, value); 
-                    return true; 
+                    throw e;
                 }
             },
             clear: async function() {
@@ -167,8 +178,9 @@
             const [reportTemplates, setReportTemplates] = useState([]);
             const [currentTab, setCurrentTab] = useState('trees');
             const [currentView, setCurrentView] = useState('list');
-            const [listViewMode, setListViewMode] = useState('grid');
+            const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'list', 'table', 'thumbnails'
             const [selectedTreeId, setSelectedTreeId] = useState(null);
+            const [detailViewMode, setDetailViewMode] = useState('view'); // 'view' or 'edit'
             const [showForm, setShowForm] = useState(false);
             const [showPlotForm, setShowPlotForm] = useState(false);
             const [showImport, setShowImport] = useState(false);
@@ -232,8 +244,24 @@
 
             function showSave(msg) { setSaveMsg(msg); setTimeout(() => setSaveMsg(''), 3000); }
 
-            async function saveTrees(data) { await storage.set('trees', JSON.stringify(data)); showSave('✅ Saved!'); }
-            async function savePlots(data) { await storage.set('plots', JSON.stringify(data)); showSave('✅ Saved!'); }
+            async function saveTrees(data) { 
+                try {
+                    await storage.set('trees', JSON.stringify(data)); 
+                    showSave('✅ Saved!');
+                } catch (error) {
+                    showSave('❌ Storage full! Remove photos.');
+                    console.error('Save error:', error);
+                }
+            }
+            async function savePlots(data) { 
+                try {
+                    await storage.set('plots', JSON.stringify(data)); 
+                    showSave('✅ Saved!');
+                } catch (error) {
+                    showSave('❌ Storage full!');
+                    console.error('Save error:', error);
+                }
+            }
             async function saveReportTemplates(data) { await storage.set('report-templates', JSON.stringify(data)); }
 
             async function clearDatabase() {
@@ -273,12 +301,18 @@
                 setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photo: '', description: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
+                setDetailViewMode('view');
             }
 
             function editTree(tree) { 
                 setTreeForm({...tree, notes: tree.notes || []}); 
-                setEditId(tree.id); 
-                setShowForm(true); 
+                setEditId(tree.id);
+                // If we're in detail view, switch to edit mode
+                if (currentView === 'detail' && selectedTreeId === tree.id) {
+                    setDetailViewMode('edit');
+                } else {
+                    setShowForm(true);
+                }
             }
 
             async function deleteTree(id) {
@@ -373,6 +407,7 @@
             function viewTreeDetail(treeId) {
                 setSelectedTreeId(treeId);
                 setCurrentView('detail');
+                setDetailViewMode('view');
             }
 
             function backToList() {
@@ -596,22 +631,32 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                             if (jsonData.trees) { 
                                 console.log('Importing trees:', jsonData.trees.length);
                                 setTrees(jsonData.trees); 
-                                await saveTrees(jsonData.trees);
-                                
-                                // Verify save
-                                const verify = await storage.get('trees');
-                                console.log('Verified saved trees:', verify ? JSON.parse(verify).length : 0);
+                                try {
+                                    await saveTrees(jsonData.trees);
+                                    
+                                    // Verify save
+                                    const verify = await storage.get('trees');
+                                    console.log('Verified saved trees:', verify ? JSON.parse(verify).length : 0);
+                                } catch (error) {
+                                    alert('⚠️ STORAGE FULL!\n\nYour backup has too many photos. Options:\n\n1. Remove photos from some trees\n2. Use desktop/laptop (more storage)\n3. Split into smaller backups\n\nError: ' + error.message);
+                                    setLoading(false);
+                                    return;
+                                }
                             }
                             if (jsonData.plots) { 
                                 console.log('Importing plots:', jsonData.plots.length);
                                 setPlots(jsonData.plots); 
-                                await savePlots(jsonData.plots);
-                                
-                                // Verify save
-                                const verify = await storage.get('plots');
-                                console.log('Verified saved plots:', verify ? JSON.parse(verify).length : 0);
+                                try {
+                                    await savePlots(jsonData.plots);
+                                    
+                                    // Verify save
+                                    const verify = await storage.get('plots');
+                                    console.log('Verified saved plots:', verify ? JSON.parse(verify).length : 0);
+                                } catch (error) {
+                                    alert('Error saving plots: ' + error.message);
+                                }
                             }
-                            showSave('✅ Data replaced! Refresh to verify.');
+                            showSave('✅ Data imported successfully!');
                         } else {
                             // MERGE mode
                             if (jsonData.trees) {
@@ -726,7 +771,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                 {currentTab === 'reports' && `Reports - ${reportData.length} results`}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                                💾 Storage: {storage.storageType} • 📸 Photos: Max 1MB
+                                💾 Storage: {storage.storageType} • 📸 Photos: Max 1MB {trees.length > 0 && `• 💿 ~${Math.round(JSON.stringify(trees).length / 1024)}KB used`}
                             </p>
                         </div>
 
@@ -751,6 +796,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         </div>
                                         <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
                                             <button onClick={() => setListViewMode('grid')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'grid' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Grid">⊞</button>
+                                            <button onClick={() => setListViewMode('thumbnails')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'thumbnails' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Photos">🖼️</button>
                                             <button onClick={() => setListViewMode('compact')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'compact' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Compact">▦</button>
                                             <button onClick={() => setListViewMode('list')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'list' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="List">≡</button>
                                             <button onClick={() => setListViewMode('table')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'table' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Table">☰</button>
@@ -873,6 +919,26 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         <div className="text-6xl mb-4">🌳</div>
                                         <h3 className="text-xl font-semibold text-gray-600">No trees</h3>
                                     </div>
+                                ) : listViewMode === 'thumbnails' ? (
+                                    <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3">
+                                        {sortedTrees.map(tree => (
+                                            <div key={tree.id} className="relative aspect-square bg-white rounded-lg shadow hover:shadow-lg cursor-pointer overflow-hidden group" onClick={() => viewTreeDetail(tree.id)}>
+                                                {tree.photo ? (
+                                                    <img src={tree.photo} className="w-full h-full object-cover" alt={tree.name} />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center bg-gray-100 text-4xl">🌳</div>
+                                                )}
+                                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                                                    <div className="text-white text-xs font-semibold truncate">{tree.name}</div>
+                                                    <div className="text-white/80 text-xs truncate">#{tree.treeNumber}</div>
+                                                </div>
+                                                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                    <button onClick={() => editTree(tree)} className="bg-blue-600 text-white p-1 rounded text-xs">✏️</button>
+                                                    <button onClick={() => deleteTree(tree.id)} className="bg-red-600 text-white p-1 rounded text-xs">🗑️</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 ) : listViewMode === 'grid' ? (
                                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                                         {sortedTrees.map(tree => (
@@ -980,37 +1046,83 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                             </>
                         )}
 
-                        {/* TREE DETAIL VIEW - keeping existing */}
+                        {/* TREE DETAIL VIEW */}
                         {currentTab === 'trees' && currentView === 'detail' && selectedTree && (
                             <div>
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                    <button onClick={backToList} className="text-blue-600 font-semibold">← Back</button>
+                                    <button onClick={backToList} className="text-blue-600 font-semibold">← Back to Trees</button>
                                 </div>
-                                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                    <div className="flex justify-between mb-6">
-                                        <div>
-                                            <h2 className="text-3xl font-bold">{selectedTree.name} <span className="text-lg bg-blue-100 px-3 py-1 rounded-full">#{selectedTree.treeNumber}</span></h2>
-                                            <p className="text-xl italic">{selectedTree.species}</p>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => editTree(selectedTree)} className="bg-blue-600 text-white px-4 py-2 rounded-lg">✏️ Edit</button>
-                                            <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
-                                        </div>
-                                    </div>
-                                    {selectedTree.photo && <img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg mb-6" />}
-                                    <div className="space-y-2 mb-6">
-                                        <div>📍 Plot: {selectedTree.plotName}</div>
-                                        <div>📏 Size: {selectedTree.size}</div>
-                                        <div>📅 Planted: {new Date(selectedTree.plantDate).toLocaleDateString()}</div>
-                                        <div>🏥 Condition: <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
-                                        {selectedTree.description && (
-                                            <div className="mt-4 pt-4 border-t">
-                                                <div className="font-medium mb-1">📝 Description:</div>
-                                                <div className="text-gray-700 whitespace-pre-wrap">{selectedTree.description}</div>
+                                
+                                {detailViewMode === 'edit' ? (
+                                    // EDIT MODE
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-2xl font-bold mb-4">Edit Tree</h2>
+                                        <form onSubmit={handleTreeSubmit} className="space-y-4">
+                                            <div className="grid md:grid-cols-2 gap-4">
+                                                <input required placeholder="Tree Name" value={treeForm.name} onChange={e => setTreeForm({...treeForm, name: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
+                                                <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
+                                                <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="very-small">Very Small</option>
+                                                    <option value="small">Small</option>
+                                                    <option value="normal">Normal</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="large">Large</option>
+                                                </select>
+                                                <input required type="date" value={treeForm.plantDate} onChange={e => setTreeForm({...treeForm, plantDate: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.condition} onChange={e => setTreeForm({...treeForm, condition: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="good">Good</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="bad">Bad</option>
+                                                    <option value="RIP">RIP</option>
+                                                </select>
                                             </div>
-                                        )}
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                                                <textarea placeholder="Additional details..." value={treeForm.description} onChange={e => setTreeForm({...treeForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Photo (auto-compressed to max 1MB)</label>
+                                                <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="px-3 py-2 border rounded w-full" />
+                                                {treeForm.photo && <img src={treeForm.photo} className="mt-2 h-32 rounded object-cover" />}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">💾 Save Changes</button>
+                                                <button type="button" onClick={() => setDetailViewMode('view')} className="bg-gray-300 px-6 py-2 rounded">Cancel</button>
+                                            </div>
+                                        </form>
                                     </div>
-                                </div>
+                                ) : (
+                                    // VIEW MODE
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <div className="flex justify-between mb-6">
+                                            <div>
+                                                <h2 className="text-3xl font-bold">{selectedTree.name} <span className="text-lg bg-blue-100 px-3 py-1 rounded-full">#{selectedTree.treeNumber}</span></h2>
+                                                <p className="text-xl italic">{selectedTree.species}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => editTree(selectedTree)} className="bg-blue-600 text-white px-4 py-2 rounded-lg">✏️ Edit</button>
+                                                <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
+                                            </div>
+                                        </div>
+                                        {selectedTree.photo && <img src={selectedTree.photo} className="w-full max-h-96 object-cover rounded-lg mb-6" />}
+                                        <div className="space-y-2 mb-6">
+                                            <div>📍 Plot: {selectedTree.plotName}</div>
+                                            <div>📏 Size: {selectedTree.size}</div>
+                                            <div>📅 Planted: {new Date(selectedTree.plantDate).toLocaleDateString()}</div>
+                                            <div>🏥 Condition: <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
+                                            {selectedTree.description && (
+                                                <div className="mt-4 pt-4 border-t">
+                                                    <div className="font-medium mb-1">📝 Description:</div>
+                                                    <div className="text-gray-700 whitespace-pre-wrap">{selectedTree.description}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                
                                 <div className="bg-white rounded-lg shadow-lg p-6">
                                     <h3 className="text-2xl font-bold mb-4">📝 Notes</h3>
                                     <div className="mb-6 p-4 bg-gray-50 rounded-lg">
