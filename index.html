@@ -32,16 +32,21 @@
             dbName: 'TreeTrackerDB',
             db: null,
             storageType: 'localStorage',
+            ready: false,
             init: async function() {
                 return new Promise((resolve) => {
                     const request = indexedDB.open(this.dbName, 1);
                     request.onerror = () => { 
+                        console.warn('IndexedDB failed, using localStorage');
                         this.storageType = 'localStorage';
+                        this.ready = true;
                         resolve(false); 
                     };
                     request.onsuccess = (event) => { 
                         this.db = event.target.result; 
                         this.storageType = 'IndexedDB';
+                        this.ready = true;
+                        console.log('Storage initialized: IndexedDB');
                         resolve(true); 
                     };
                     request.onupgradeneeded = (event) => {
@@ -59,25 +64,43 @@
                             const tx = this.db.transaction(['data'], 'readonly');
                             const req = tx.objectStore('data').get(key);
                             req.onsuccess = () => resolve(req.result ? req.result.value : null);
-                            req.onerror = () => resolve(localStorage.getItem(key));
+                            req.onerror = () => {
+                                console.warn('IndexedDB get failed, trying localStorage');
+                                resolve(localStorage.getItem(key));
+                            };
                         });
                     }
                     return localStorage.getItem(key);
-                } catch (e) { return localStorage.getItem(key); }
+                } catch (e) { 
+                    console.error('Storage get error:', e);
+                    return localStorage.getItem(key); 
+                }
             },
             set: async function(key, value) {
                 try {
                     if (this.db) {
-                        return new Promise((resolve) => {
+                        return new Promise((resolve, reject) => {
                             const tx = this.db.transaction(['data'], 'readwrite');
                             const req = tx.objectStore('data').put({ key, value });
-                            req.onsuccess = () => resolve(true);
-                            req.onerror = () => { localStorage.setItem(key, value); resolve(true); };
+                            req.onsuccess = () => {
+                                console.log(`Saved to IndexedDB: ${key}`);
+                                resolve(true);
+                            };
+                            req.onerror = (err) => { 
+                                console.warn('IndexedDB set failed, using localStorage', err);
+                                localStorage.setItem(key, value); 
+                                resolve(true); 
+                            };
                         });
                     }
                     localStorage.setItem(key, value);
+                    console.log(`Saved to localStorage: ${key}`);
                     return true;
-                } catch (e) { localStorage.setItem(key, value); return true; }
+                } catch (e) { 
+                    console.error('Storage set error:', e);
+                    localStorage.setItem(key, value); 
+                    return true; 
+                }
             },
             clear: async function() {
                 try {
@@ -94,7 +117,11 @@
                 } catch (e) { localStorage.clear(); return true; }
             }
         };
-        storage.init();
+        
+        // Initialize storage immediately
+        (async () => {
+            await storage.init();
+        })();
 
         // Image compression
         async function compressImage(file, maxSizeMB = 1) {
@@ -181,13 +208,25 @@
 
             async function loadData() {
                 try {
+                    // Wait for storage to be ready (max 3 seconds)
+                    let attempts = 0;
+                    while (!storage.ready && attempts < 30) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    
+                    if (!storage.ready) {
+                        console.warn('Storage not ready, data may not load correctly');
+                    }
+                    
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
                     const rt = await storage.get('report-templates');
                     if (td) setTrees(JSON.parse(td));
                     if (pd) setPlots(JSON.parse(pd));
                     if (rt) setReportTemplates(JSON.parse(rt));
-                } catch (e) { console.error(e); }
+                    console.log('Loaded:', { trees: td ? JSON.parse(td).length : 0, plots: pd ? JSON.parse(pd).length : 0 });
+                } catch (e) { console.error('Load error:', e); }
                 finally { setLoading(false); }
             }
 
@@ -536,6 +575,13 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                 const reader = new FileReader();
                 reader.onload = async (event) => {
                     try {
+                        // Wait for storage to be ready
+                        let attempts = 0;
+                        while (!storage.ready && attempts < 30) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            attempts++;
+                        }
+                        
                         const jsonData = JSON.parse(event.target.result);
                         
                         if (!jsonData.trees && !jsonData.plots) {
@@ -546,27 +592,48 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                         const result = confirm(`Restore ${jsonData.trees?.length || 0} trees and ${jsonData.plots?.length || 0} plots?\n\nOK = REPLACE all data\nCancel = MERGE with existing`);
                         
                         if (result) {
-                            if (jsonData.trees) { setTrees(jsonData.trees); await saveTrees(jsonData.trees); }
-                            if (jsonData.plots) { setPlots(jsonData.plots); await savePlots(jsonData.plots); }
-                            showSave('✅ Data replaced!');
+                            // REPLACE mode
+                            if (jsonData.trees) { 
+                                console.log('Importing trees:', jsonData.trees.length);
+                                setTrees(jsonData.trees); 
+                                await saveTrees(jsonData.trees);
+                                
+                                // Verify save
+                                const verify = await storage.get('trees');
+                                console.log('Verified saved trees:', verify ? JSON.parse(verify).length : 0);
+                            }
+                            if (jsonData.plots) { 
+                                console.log('Importing plots:', jsonData.plots.length);
+                                setPlots(jsonData.plots); 
+                                await savePlots(jsonData.plots);
+                                
+                                // Verify save
+                                const verify = await storage.get('plots');
+                                console.log('Verified saved plots:', verify ? JSON.parse(verify).length : 0);
+                            }
+                            showSave('✅ Data replaced! Refresh to verify.');
                         } else {
+                            // MERGE mode
                             if (jsonData.trees) {
                                 const merged = [...trees, ...jsonData.trees];
+                                console.log('Merging trees:', merged.length);
                                 setTrees(merged);
                                 await saveTrees(merged);
                             }
                             if (jsonData.plots) {
                                 const merged = [...plots, ...jsonData.plots];
+                                console.log('Merging plots:', merged.length);
                                 setPlots(merged);
                                 await savePlots(merged);
                             }
-                            showSave('✅ Data merged!');
+                            showSave('✅ Data merged! Refresh to verify.');
                         }
                         
                         setShowImport(false);
                         if (importJSONRef.current) importJSONRef.current.value = '';
                     } catch (error) {
-                        alert('Error importing JSON file');
+                        console.error('Import error:', error);
+                        alert('Error importing JSON file: ' + error.message);
                     }
                 };
                 reader.readAsText(file);
