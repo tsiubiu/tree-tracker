@@ -175,8 +175,7 @@
         function TreeTrackerApp() {
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
-            const [reportTemplates, setReportTemplates] = useState([]);
-            const [currentTab, setCurrentTab] = useState('dashboard');
+            const [currentTab, setCurrentTab] = useState('trees');
             const [currentView, setCurrentView] = useState('list');
             const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'list', 'table', 'thumbnails'
             const [selectedTreeId, setSelectedTreeId] = useState(null);
@@ -195,19 +194,13 @@
             const [filterYear, setFilterYear] = useState('all');
             const [searchText, setSearchText] = useState('');
             
-            const [sortBy, setSortBy] = useState('name');
+            const [sortBy, setSortBy] = useState('plotId');
             const [sortDirection, setSortDirection] = useState('asc');
-            const [sortBy2, setSortBy2] = useState('none');
+            const [sortBy2, setSortBy2] = useState('number');
             const [sortDirection2, setSortDirection2] = useState('asc');
             
-            // Reports state
-            const [reportType, setReportType] = useState('notes-2025');
-            const [reportYear, setReportYear] = useState('2025');
-            const [reportCondition, setReportCondition] = useState('RIP');
-            const [customReportName, setCustomReportName] = useState('');
-            
             const [treeForm, setTreeForm] = useState({
-                name: '', species: '', plotName: '', treeNumber: '',
+                name: '', species: '', plotName: '', plotId: '', treeNumber: '',
                 size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []
             });
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
@@ -221,7 +214,6 @@
 
             async function loadData() {
                 try {
-                    // Wait for storage to be ready (max 3 seconds)
                     let attempts = 0;
                     while (!storage.ready && attempts < 30) {
                         await new Promise(resolve => setTimeout(resolve, 100));
@@ -229,12 +221,11 @@
                     }
                     
                     if (!storage.ready) {
-                        console.warn('Storage not ready, data may not load correctly');
+                        console.warn('Storage not ready');
                     }
                     
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
-                    const rt = await storage.get('report-templates');
                     
                     // Migrate old photo field to photos array
                     if (td) {
@@ -254,17 +245,16 @@
                                 };
                             }
                             if (!tree.photos) tree.photos = [];
+                            if (!tree.plotId) tree.plotId = ''; // Add plotId if missing
                             return tree;
                         });
                         setTrees(migratedTrees);
-                        if (parsedTrees.some(t => t.photo)) {
+                        if (parsedTrees.some(t => t.photo || !t.plotId)) {
                             await saveTrees(migratedTrees);
                         }
                     }
                     
                     if (pd) setPlots(JSON.parse(pd));
-                    if (rt) setReportTemplates(JSON.parse(rt));
-                    console.log('Loaded:', { trees: td ? JSON.parse(td).length : 0, plots: pd ? JSON.parse(pd).length : 0 });
                 } catch (e) { console.error('Load error:', e); }
                 finally { setLoading(false); }
             }
@@ -289,7 +279,6 @@
                     console.error('Save error:', error);
                 }
             }
-            async function saveReportTemplates(data) { await storage.set('report-templates', JSON.stringify(data)); }
 
             async function clearDatabase() {
                 const confirmed = confirm('⚠️ WARNING: This will DELETE ALL DATA including trees, plots, and notes!\n\nThis action CANNOT be undone.\n\nAre you absolutely sure?');
@@ -325,7 +314,7 @@
             }
 
             function resetTreeForm() {
-                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
+                setTreeForm({name: '', species: '', plotName: '', plotId: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
                 setDetailViewMode('view');
@@ -515,6 +504,7 @@
                     case 'number': return tree.treeNumber.toLowerCase();
                     case 'species': return tree.species.toLowerCase();
                     case 'plot': return tree.plotName.toLowerCase();
+                    case 'plotId': return tree.plotId || '';
                     case 'date': return new Date(tree.plantDate);
                     case 'condition':
                         const conditionOrder = { 'good': 1, 'medium': 2, 'bad': 3, 'RIP': 4 };
@@ -544,80 +534,6 @@
                     return primaryResult;
                 });
                 return sorted;
-            }
-
-            // Report functions
-            function getReportData() {
-                switch(reportType) {
-                    case 'notes-year':
-                        return trees.filter(t => t.notes && t.notes.some(n => 
-                            new Date(n.date).getFullYear().toString() === reportYear
-                        )).map(tree => ({
-                            ...tree,
-                            notes: tree.notes.filter(n => new Date(n.date).getFullYear().toString() === reportYear)
-                        }));
-                    
-                    case 'condition':
-                        return trees.filter(t => t.condition === reportCondition);
-                    
-                    case 'recent-notes':
-                        const thirtyDaysAgo = new Date();
-                        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                        return trees.filter(t => t.notes && t.notes.some(n => 
-                            new Date(n.date) >= thirtyDaysAgo
-                        )).map(tree => ({
-                            ...tree,
-                            notes: tree.notes.filter(n => new Date(n.date) >= thirtyDaysAgo)
-                        }));
-                    
-                    case 'no-notes':
-                        return trees.filter(t => !t.notes || t.notes.length === 0);
-                    
-                    case 'by-plot':
-                        return trees.filter(t => filterPlot !== 'all' ? t.plotName === filterPlot : true);
-                    
-                    default:
-                        return trees;
-                }
-            }
-
-            function saveReportTemplate() {
-                if (!customReportName.trim()) {
-                    alert('Please enter a template name');
-                    return;
-                }
-                
-                const template = {
-                    id: Date.now().toString(),
-                    name: customReportName,
-                    type: reportType,
-                    year: reportYear,
-                    condition: reportCondition,
-                    plot: filterPlot,
-                    createdAt: new Date().toISOString()
-                };
-                
-                const updated = [...reportTemplates, template];
-                setReportTemplates(updated);
-                saveReportTemplates(updated);
-                setCustomReportName('');
-                showSave('✅ Report template saved!');
-            }
-
-            function loadReportTemplate(template) {
-                setReportType(template.type);
-                setReportYear(template.year);
-                setReportCondition(template.condition);
-                setFilterPlot(template.plot);
-                showSave('✅ Template loaded!');
-            }
-
-            function deleteReportTemplate(id) {
-                if (confirm('Delete this report template?')) {
-                    const updated = reportTemplates.filter(t => t.id !== id);
-                    setReportTemplates(updated);
-                    saveReportTemplates(updated);
-                }
             }
 
             // Import/Export functions
@@ -827,7 +743,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
             const sortedTrees = getSortedTrees(filteredTrees);
             const hasActiveFilters = filterPlot !== 'all' || filterCondition !== 'all' || filterYear !== 'all' || searchText.trim();
             const selectedTree = selectedTreeId ? trees.find(t => t.id === selectedTreeId) : null;
-            const reportData = getReportData();
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4">
@@ -859,7 +774,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                         <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2">
                             <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
                             <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
-                            <button onClick={() => setCurrentTab('reports')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'reports' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Reports</button>
                         </div>
 
                         {/* TREES TAB */}
@@ -925,6 +839,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                     </div>
                                     <div className="border-t pt-4 grid md:grid-cols-3 gap-4">
                                         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="plotId">Sort: Plot ID</option>
                                             <option value="name">Sort: Name</option>
                                             <option value="number">Sort: Number</option>
                                             <option value="species">Sort: Species</option>
@@ -937,6 +852,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         </button>
                                         <select value={sortBy2} onChange={(e) => setSortBy2(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
                                             <option value="none">Then by: None</option>
+                                            <option value="plotId">Then: Plot ID</option>
                                             <option value="name">Then: Name</option>
                                             <option value="number">Then: Number</option>
                                             <option value="species">Then: Species</option>
@@ -955,6 +871,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
                                                 <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
+                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
                                                     <option value="very-small">Very Small</option>
@@ -1193,6 +1110,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
                                                 <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
+                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
                                                     <option value="very-small">Very Small</option>
@@ -1397,187 +1315,40 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                             </>
                         )}
 
-                        {/* REPORTS TAB */}
-                        {currentTab === 'reports' && (
-                            <>
-                                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                    <h2 className="text-2xl font-bold mb-4">📊 Generate Report</h2>
-                                    
-                                    <div className="grid md:grid-cols-2 gap-6 mb-6">
-                                        <div>
-                                            <label className="block font-semibold mb-2">Report Type</label>
-                                            <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                                                <option value="notes-year">Notes by Year</option>
-                                                <option value="condition">Trees by Condition</option>
-                                                <option value="recent-notes">Recent Notes (30 days)</option>
-                                                <option value="no-notes">Trees Without Notes</option>
-                                                <option value="by-plot">Trees by Plot</option>
-                                            </select>
-                                        </div>
-
-                                        {reportType === 'notes-year' && (
-                                            <div>
-                                                <label className="block font-semibold mb-2">Year</label>
-                                                <select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                                                    <option value="2025">2025</option>
-                                                    <option value="2024">2024</option>
-                                                    <option value="2023">2023</option>
-                                                </select>
-                                            </div>
-                                        )}
-
-                                        {reportType === 'condition' && (
-                                            <div>
-                                                <label className="block font-semibold mb-2">Condition</label>
-                                                <select value={reportCondition} onChange={(e) => setReportCondition(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                                                    <option value="RIP">RIP</option>
-                                                    <option value="bad">Bad</option>
-                                                    <option value="medium">Medium</option>
-                                                    <option value="good">Good</option>
-                                                </select>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="border-t pt-4">
-                                        <h3 className="font-semibold mb-3">💾 Save as Template</h3>
-                                        <div className="flex gap-2">
-                                            <input type="text" value={customReportName} onChange={(e) => setCustomReportName(e.target.value)} placeholder="Template name..." className="flex-1 px-3 py-2 border rounded-lg" />
-                                            <button onClick={saveReportTemplate} className="bg-blue-600 text-white px-6 py-2 rounded-lg">Save Template</button>
-                                        </div>
-                                    </div>
-
-                                    {reportTemplates.length > 0 && (
-                                        <div className="border-t pt-4 mt-4">
-                                            <h3 className="font-semibold mb-3">📋 Saved Templates</h3>
-                                            <div className="grid md:grid-cols-2 gap-3">
-                                                {reportTemplates.map(template => (
-                                                    <div key={template.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                                        <div>
-                                                            <div className="font-medium">{template.name}</div>
-                                                            <div className="text-xs text-gray-500">{template.type}</div>
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            <button onClick={() => loadReportTemplate(template)} className="text-blue-600 text-sm">Load</button>
-                                                            <button onClick={() => deleteReportTemplate(template.id)} className="text-red-600 text-sm">Delete</button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="bg-white rounded-lg shadow-lg p-6">
-                                    <h3 className="text-xl font-bold mb-4">Results ({reportData.length})</h3>
-                                    {reportData.length === 0 ? (
-                                        <div className="text-center py-8 text-gray-500">No results for this report</div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {reportData.map(tree => (
-                                                <div key={tree.id} className="p-4 bg-gray-50 rounded-lg">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div>
-                                                            <h4 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h4>
-                                                            <div className="text-sm text-gray-600">{tree.species} • {tree.plotName}</div>
-                                                        </div>
-                                                        <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span>
-                                                    </div>
-                                                    {tree.notes && tree.notes.length > 0 && (
-                                                        <div className="mt-3 space-y-2">
-                                                            {tree.notes.map(note => (
-                                                                <div key={note.id} className="text-sm bg-white p-2 rounded">
-                                                                    <div className="text-gray-500 text-xs mb-1">{new Date(note.date).toLocaleDateString()}</div>
-                                                                    <div>{note.text}</div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </>
-                        )}
-
-                        {/* HELP TAB */}
                         {currentTab === 'help' && (
                             <div className="bg-white rounded-lg shadow-lg p-6">
-                                <h2 className="text-3xl font-bold mb-6">📖 Help & Guide</h2>
+                                <h2 className="text-2xl font-bold mb-4">📖 Quick Guide</h2>
                                 
-                                <div className="space-y-6">
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">🌳 Trees Tab</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li><strong>Add Tree:</strong> Click green ➕ button. All photos auto-compressed to max 1MB</li>
-                                            <li><strong>Filters:</strong> Search by name/species/number, filter by plot/condition/year</li>
-                                            <li><strong>Sorting:</strong> 2-level sorting - primary & secondary. Click table headers</li>
-                                            <li><strong>Views:</strong> Grid (photos), Compact, List, Table</li>
-                                            <li><strong>Notes:</strong> Click tree to add timestamped notes</li>
-                                            <li><strong>Sizes:</strong> Very Small, Small, Normal, Medium, Large</li>
-                                            <li><strong>Conditions:</strong> Good, Medium, Bad, RIP</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">📍 Plots Tab</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li><strong>Create Plots:</strong> Organize trees by location</li>
-                                            <li><strong>Plot Photos:</strong> Add photos of plot areas (1MB max)</li>
-                                            <li><strong>View Trees:</strong> Click "View Trees →" to filter by plot</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">📊 Reports Tab</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li><strong>Notes by Year:</strong> All notes from specific year (2025/2024/2023)</li>
-                                            <li><strong>By Condition:</strong> Filter by Good/Medium/Bad/RIP</li>
-                                            <li><strong>Recent Notes:</strong> Last 30 days activity</li>
-                                            <li><strong>Without Notes:</strong> Trees needing attention</li>
-                                            <li><strong>Save Templates:</strong> Save favorite reports for quick access</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">💾 Import & Export</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li><strong>CSV:</strong> Download template, fill data, import multiple trees</li>
-                                            <li><strong>JSON Backup:</strong> Complete backup with photos & notes</li>
-                                            <li><strong>Import:</strong> REPLACE (clear all) or MERGE (add to existing)</li>
-                                            <li><strong>Cross-Device:</strong> Export → upload to cloud → import on other device</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">🗑️ Database</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li><strong>Clear DB:</strong> Red button - deletes EVERYTHING</li>
-                                            <li><strong>Safety:</strong> 3-step confirmation required (type "DELETE ALL")</li>
-                                            <li><strong>⚠️ Warning:</strong> Always export backup first!</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">💡 Pro Tips</h3>
-                                        <ul className="space-y-2 text-gray-700 list-disc list-inside">
-                                            <li>📸 Take photos for easy visual identification</li>
-                                            <li>📝 Add notes regularly to track health & maintenance</li>
-                                            <li>💾 Export backups weekly to cloud storage</li>
-                                            <li>📊 Save report templates for frequently used reports</li>
-                                            <li>🔍 Combine search + filters for powerful finding</li>
-                                            <li>🌳 Use meaningful numbers (001, 002...) for tracking</li>
-                                        </ul>
-                                    </section>
-
-                                    <section>
-                                        <h3 className="text-xl font-bold text-green-700 mb-3">💾 Storage</h3>
-                                        <p className="text-gray-700">
-                                            Data stored locally in browser (IndexedDB or localStorage). 
-                                            Works offline. To sync across devices, use Export/Import.
-                                        </p>
-                                    </section>
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">🌳 Trees</h3>
+                                        <p className="text-sm text-gray-700">➕ Add trees with photos (auto-compressed to 1MB) • 📸 Use camera or upload • 🔍 Filter & 2-level sort • 📝 Click tree to add notes • 4 view modes</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📍 Plots</h3>
+                                        <p className="text-sm text-gray-700">Create plots with photos • Organize trees by location • Click "View Trees" to filter</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📊 Dashboard</h3>
+                                        <p className="text-sm text-gray-700">Overview stats • Health breakdown • Click cards to filter trees • Recent activity feed</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">💾 Backup</h3>
+                                        <p className="text-sm text-gray-700">💾 Export JSON for full backup • 📄 CSV for bulk import • Works offline • Sync via export/import</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📸 Photos</h3>
+                                        <p className="text-sm text-gray-700">Up to 10 photos per tree • 📷 Take with camera • Set primary photo • Add captions • Swipe gallery</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">💡 Tips</h3>
+                                        <p className="text-sm text-gray-700">Export weekly • Use Plot ID for organization • Default sort: Plot ID → Tree# • Add notes regularly</p>
+                                    </div>
                                 </div>
                             </div>
                         )}
