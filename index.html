@@ -203,7 +203,7 @@
                 name: '', species: '', plotName: '', plotId: '', treeNumber: '',
                 size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []
             });
-            const [plotForm, setPlotForm] = useState({name: '', plotId: '', photo: '', description: ''});
+            const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
             const fileRef = useRef(null);
             const plotPhotoRef = useRef(null);
@@ -773,46 +773,9 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                         {/* Tabs */}
                         <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2">
                             <button onClick={() => setCurrentTab('dashboard')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'dashboard' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Dashboard</button>
-                            <button onClick={() => setCurrentTab('dashboard')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'dashboard' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Dashboard</button>
                             <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
                             <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
                         </div>
-
-                        {/* DASHBOARD TAB */}
-                        {currentTab === 'dashboard' && (
-                            <div className="space-y-6">
-                                <div className="grid md:grid-cols-4 gap-4">
-                                    <div className="bg-white rounded-lg shadow-lg p-6 text-center">
-                                        <div className="text-4xl mb-2">🌳</div>
-                                        <div className="text-3xl font-bold text-green-600">{trees.length}</div>
-                                        <div className="text-sm text-gray-600">Total Trees</div>
-                                    </div>
-                                    <div className="bg-white rounded-lg shadow-lg p-6 text-center">
-                                        <div className="text-4xl mb-2">📍</div>
-                                        <div className="text-3xl font-bold text-blue-600">{plots.length}</div>
-                                        <div className="text-sm text-gray-600">Plots</div>
-                                    </div>
-                                    <div className="bg-white rounded-lg shadow-lg p-6 text-center">
-                                        <div className="text-4xl mb-2">📸</div>
-                                        <div className="text-3xl font-bold text-purple-600">{trees.reduce((sum, t) => sum + (t.photos?.length || 0), 0)}</div>
-                                        <div className="text-sm text-gray-600">Photos</div>
-                                    </div>
-                                    <div className="bg-white rounded-lg shadow-lg p-6 text-center">
-                                        <div className="text-4xl mb-2">⚡</div>
-                                        <div className="text-3xl font-bold text-orange-600">{trees.filter(t => t.condition === 'bad' || t.condition === 'RIP').length}</div>
-                                        <div className="text-sm text-gray-600">Need Attention</div>
-                                    </div>
-                                </div>
-                                <div className="bg-white rounded-lg shadow-lg p-6">
-                                    <h3 className="text-xl font-bold mb-4">⚡ Quick Actions</h3>
-                                    <div className="grid md:grid-cols-3 gap-4">
-                                        <button onClick={() => {setCurrentTab('trees'); setShowForm(true);}} className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700">➕ Add Tree</button>
-                                        <button onClick={() => {setCurrentTab('plots'); setShowPlotForm(true);}} className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700">📍 Add Plot</button>
-                                        <button onClick={exportData} className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700">💾 Export Backup</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
                         {/* TREES TAB */}
                         {currentTab === 'trees' && currentView === 'list' && (
@@ -1315,7 +1278,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         <h2 className="text-xl font-bold mb-4">{editId ? 'Edit' : 'Add'} Plot</h2>
                                         <form onSubmit={handlePlotSubmit} className="space-y-4">
                                             <input required placeholder="Plot Name" value={plotForm.name} onChange={e => setPlotForm({...plotForm, name: e.target.value})} className="w-full px-3 py-2 border rounded" />
-                                            <input required placeholder="Plot ID (numeric)" type="number" value={plotForm.plotId} onChange={e => setPlotForm({...plotForm, plotId: e.target.value})} className="w-full px-3 py-2 border rounded" />
                                             <textarea placeholder="Description" value={plotForm.description} onChange={e => setPlotForm({...plotForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
                                             <div>
                                                 <label className="block text-sm font-medium mb-1">Plot Photo (optional)</label>
