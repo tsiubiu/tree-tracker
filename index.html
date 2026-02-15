@@ -215,16 +215,6 @@
             document.body.removeChild(link);
         }
 
-        // Convert file to base64 without compression
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        }
-
         function getConditionColor(condition) {
             const colors = {
                 'good': 'bg-green-100 text-green-800 border-green-300',
@@ -432,10 +422,10 @@
                     // Extract date from EXIF metadata
                     const photoDate = await getExifDate(file);
                     
-                    // Get original file without compression
-                    const originalBase64 = await fileToBase64(file);
+                    // Compress image
+                    const compressed = await compressImage(file, 1);
                     
-                    // Save ORIGINAL to device (no compression)
+                    // Save to device (like normal camera behavior)
                     const now = new Date();
                     const treeNumber = treeForm.treeNumber || 'new';
                     const yyyymmdd = now.getFullYear() + 
@@ -445,12 +435,9 @@
                                    String(now.getMinutes()).padStart(2, '0') + 
                                    String(now.getSeconds()).padStart(2, '0');
                     const filename = `${treeNumber} ${yyyymmdd} ${hhmmss}.jpg`;
-                    saveImageToDevice(originalBase64, filename);
+                    saveImageToDevice(compressed, filename);
                     
-                    // Compress for in-app storage only
-                    const compressed = await compressImage(file, 1);
-                    
-                    // Add compressed version to form
+                    // Add to form with extracted date
                     const newPhoto = {
                         id: Date.now().toString() + Math.random(),
                         data: compressed,
@@ -459,9 +446,7 @@
                         isPrimary: treeForm.photos.length === 0
                     };
                     setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
-                    showSave('✅ Original photo saved to device!');
-                }
-            }
+                    showSave('✅ Photo captured & saved!');
                 }
             }
 
@@ -1291,11 +1276,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <div className="text-center text-sm font-semibold text-gray-700 mb-2">
                                                     Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
                                                 </div>
-                                                {selectedTree.photos[selectedPhotoIndex]?.caption && (
-                                                    <div className="text-center text-sm text-gray-600 mb-3">
-                                                        {selectedTree.photos[selectedPhotoIndex].caption}
-                                                    </div>
-                                                )}
                                                 {selectedTree.photos.length > 1 && (
                                                     <div className="flex items-center gap-2">
                                                         <button 
@@ -1725,11 +1705,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                     <div className="text-white text-lg font-semibold mt-4">
                                         Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
                                     </div>
-                                    {selectedTree.photos[selectedPhotoIndex]?.caption && (
-                                        <div className="text-white text-base mt-2">
-                                            {selectedTree.photos[selectedPhotoIndex].caption}
-                                        </div>
-                                    )}
                                 </div>
                                 
                                 {selectedTree.photos.length > 1 && (
