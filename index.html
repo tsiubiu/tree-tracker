@@ -12,6 +12,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
@@ -160,6 +161,45 @@
                 };
                 reader.readAsDataURL(file);
             });
+        }
+
+        // Extract date from EXIF metadata
+        function getExifDate(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            EXIF.getData(img, function() {
+                                const dateTime = EXIF.getTag(this, "DateTime") || EXIF.getTag(this, "DateTimeOriginal");
+                                if (dateTime) {
+                                    // EXIF format: "YYYY:MM:DD HH:MM:SS"
+                                    const formattedDate = dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+                                    resolve(formattedDate);
+                                } else {
+                                    resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                                }
+                            });
+                        } catch (err) {
+                            resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                        }
+                    };
+                    img.onerror = () => resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Save image to device
+        function saveImageToDevice(dataUrl, filename) {
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         function getConditionColor(condition) {
@@ -343,12 +383,18 @@
             async function handlePhoto(e) {
                 const file = e.target.files[0];
                 if (file) {
+                    // Extract date from EXIF metadata
+                    const photoDate = await getExifDate(file);
+                    
+                    // Compress image
                     const compressed = await compressImage(file, 1);
+                    
+                    // Add to form with extracted date
                     const newPhoto = {
                         id: Date.now().toString() + Math.random(),
                         data: compressed,
                         date: new Date().toISOString(),
-                        caption: '',
+                        caption: `📁 ${photoDate}`,
                         isPrimary: treeForm.photos.length === 0
                     };
                     setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
@@ -359,16 +405,28 @@
             async function captureFromCamera(e) {
                 const file = e.target.files[0];
                 if (file) {
+                    // Extract date from EXIF metadata
+                    const photoDate = await getExifDate(file);
+                    
+                    // Compress image
                     const compressed = await compressImage(file, 1);
+                    
+                    // Save to device (like normal camera behavior)
+                    const timestamp = new Date().getTime();
+                    const treeNumber = treeForm.treeNumber || 'new';
+                    const filename = `${treeNumber} ${timestamp}.jpg`;
+                    saveImageToDevice(compressed, filename);
+                    
+                    // Add to form with extracted date
                     const newPhoto = {
                         id: Date.now().toString() + Math.random(),
                         data: compressed,
                         date: new Date().toISOString(),
-                        caption: '📷 Camera',
+                        caption: `📷 ${photoDate}`,
                         isPrimary: treeForm.photos.length === 0
                     };
                     setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
-                    showSave('✅ Photo captured!');
+                    showSave('✅ Photo captured & saved!');
                 }
             }
 
