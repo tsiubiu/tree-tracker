@@ -200,10 +200,10 @@
             const [sortDirection2, setSortDirection2] = useState('asc');
             
             const [treeForm, setTreeForm] = useState({
-                name: '', species: '', plotName: '', plotId: '', treeNumber: '',
+                name: '', species: '', plotName: '', treeNumber: '',
                 size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []
             });
-            const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
+            const [plotForm, setPlotForm] = useState({name: '', plotId: '', photo: '', description: ''});
             
             const fileRef = useRef(null);
             const plotPhotoRef = useRef(null);
@@ -227,36 +227,59 @@
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
                     
-                    // Migrate old photo field to photos array
+                    // Load and migrate plots first
+                    let loadedPlots = [];
+                    if (pd) {
+                        const parsedPlots = JSON.parse(pd);
+                        loadedPlots = parsedPlots.map(plot => ({
+                            ...plot,
+                            plotId: plot.plotId || '' // Ensure all plots have plotId field
+                        }));
+                        setPlots(loadedPlots);
+                    }
+                    
+                    // Load and migrate trees
                     if (td) {
                         const parsedTrees = JSON.parse(td);
                         const migratedTrees = parsedTrees.map(tree => {
+                            let migrated = {...tree};
+                            
+                            // Migrate old photo field to photos array
                             if (tree.photo && !tree.photos) {
-                                return {
-                                    ...tree,
-                                    photos: [{ 
-                                        id: Date.now().toString() + Math.random(), 
-                                        data: tree.photo, 
-                                        date: tree.plantDate || new Date().toISOString(),
-                                        caption: '',
-                                        isPrimary: true 
-                                    }],
-                                    photo: undefined
-                                };
+                                migrated.photos = [{ 
+                                    id: Date.now().toString() + Math.random(), 
+                                    data: tree.photo, 
+                                    date: tree.plantDate || new Date().toISOString(),
+                                    caption: '',
+                                    isPrimary: true 
+                                }];
+                                delete migrated.photo;
                             }
-                            if (!tree.photos) tree.photos = [];
-                            if (!tree.plotId) tree.plotId = ''; // Add plotId if missing
-                            return tree;
+                            
+                            if (!migrated.photos) migrated.photos = [];
+                            if (!migrated.description) migrated.description = '';
+                            
+                            // Sync plotId from plot based on plotName
+                            if (migrated.plotName && loadedPlots.length > 0) {
+                                const matchingPlot = loadedPlots.find(p => p.name === migrated.plotName);
+                                if (matchingPlot) {
+                                    migrated.plotId = matchingPlot.plotId || '';
+                                } else if (!migrated.plotId) {
+                                    migrated.plotId = '';
+                                }
+                            } else if (!migrated.plotId) {
+                                migrated.plotId = '';
+                            }
+                            
+                            return migrated;
                         });
                         setTrees(migratedTrees);
-                        if (parsedTrees.some(t => t.photo || !t.plotId)) {
-                            await saveTrees(migratedTrees);
-                        }
                     }
-                    
-                    if (pd) setPlots(JSON.parse(pd));
-                } catch (e) { console.error('Load error:', e); }
-                finally { setLoading(false); }
+                } catch (e) { 
+                    console.error('Load error:', e); 
+                } finally { 
+                    setLoading(false); 
+                }
             }
 
             function showSave(msg) { setSaveMsg(msg); setTimeout(() => setSaveMsg(''), 3000); }
@@ -302,9 +325,15 @@
 
             async function handleTreeSubmit(e) {
                 e.preventDefault();
+                
+                // Find plot by name and get its plotId
+                const matchingPlot = plots.find(p => p.name === treeForm.plotName);
+                const plotId = matchingPlot ? matchingPlot.plotId : '';
+                
                 const newTree = { 
                     id: editId || Date.now().toString(), 
                     ...treeForm,
+                    plotId: plotId,
                     notes: treeForm.notes || []
                 };
                 const updated = editId ? trees.map(t => t.id === editId ? newTree : t) : [...trees, newTree];
@@ -314,7 +343,7 @@
             }
 
             function resetTreeForm() {
-                setTreeForm({name: '', species: '', plotName: '', plotId: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
+                setTreeForm({name: '', species: '', plotName: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
                 setShowForm(false);
                 setEditId(null);
                 setDetailViewMode('view');
@@ -450,7 +479,20 @@
                 const updated = editId ? plots.map(p => p.id === editId ? newPlot : p) : [...plots, newPlot];
                 setPlots(updated);
                 await savePlots(updated);
-                setPlotForm({name: '', photo: '', description: ''});
+                
+                // Update all trees with this plot name to have the new plotId
+                if (trees && trees.length > 0 && newPlot.plotId) {
+                    const updatedTrees = trees.map(tree => {
+                        if (tree.plotName === newPlot.name) {
+                            return {...tree, plotId: newPlot.plotId || ''};
+                        }
+                        return tree;
+                    });
+                    setTrees(updatedTrees);
+                    await saveTrees(updatedTrees);
+                }
+                
+                setPlotForm({name: '', plotId: '', photo: '', description: ''});
                 setShowPlotForm(false);
                 setEditId(null);
             }
@@ -869,7 +911,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
                                                 <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
-                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
                                                     <option value="very-small">Very Small</option>
@@ -1108,7 +1149,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
                                                 <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
-                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
                                                 <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
                                                     <option value="very-small">Very Small</option>
@@ -1275,6 +1315,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         <h2 className="text-xl font-bold mb-4">{editId ? 'Edit' : 'Add'} Plot</h2>
                                         <form onSubmit={handlePlotSubmit} className="space-y-4">
                                             <input required placeholder="Plot Name" value={plotForm.name} onChange={e => setPlotForm({...plotForm, name: e.target.value})} className="w-full px-3 py-2 border rounded" />
+                                            <input placeholder="Plot ID (numeric - optional)" type="number" value={plotForm.plotId} onChange={e => setPlotForm({...plotForm, plotId: e.target.value})} className="w-full px-3 py-2 border rounded" />
                                             <textarea placeholder="Description" value={plotForm.description} onChange={e => setPlotForm({...plotForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
                                             <div>
                                                 <label className="block text-sm font-medium mb-1">Plot Photo (optional)</label>
@@ -1297,6 +1338,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <div className="flex justify-between mb-2">
                                                     <div>
                                                         <h3 className="text-xl font-bold">{plot.name}</h3>
+                                                        <p className="text-sm text-gray-600">📊 Plot ID: {plot.plotId || 'Not set'}</p>
                                                         <p className="text-sm text-gray-600">🌳 {trees.filter(t => t.plotName === plot.name).length} trees</p>
                                                     </div>
                                                     <div className="flex gap-1">
