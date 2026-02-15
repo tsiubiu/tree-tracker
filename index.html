@@ -175,17 +175,30 @@
                                 const dateTime = EXIF.getTag(this, "DateTime") || EXIF.getTag(this, "DateTimeOriginal");
                                 if (dateTime) {
                                     // EXIF format: "YYYY:MM:DD HH:MM:SS"
-                                    const formattedDate = dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-                                    resolve(formattedDate);
+                                    // Convert to "YYYY-MM-DD HH:MM:SS"
+                                    const formattedDateTime = dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+                                    resolve(formattedDateTime);
                                 } else {
-                                    resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                                    // No EXIF date, use current date and time
+                                    const now = new Date();
+                                    const date = now.toISOString().split('T')[0];
+                                    const time = now.toTimeString().split(' ')[0];
+                                    resolve(`${date} ${time}`);
                                 }
                             });
                         } catch (err) {
-                            resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                            const now = new Date();
+                            const date = now.toISOString().split('T')[0];
+                            const time = now.toTimeString().split(' ')[0];
+                            resolve(`${date} ${time}`);
                         }
                     };
-                    img.onerror = () => resolve(new Date().toISOString().split('T')[0] + ' ' + new Date().toLocaleTimeString());
+                    img.onerror = () => {
+                        const now = new Date();
+                        const date = now.toISOString().split('T')[0];
+                        const time = now.toTimeString().split(' ')[0];
+                        resolve(`${date} ${time}`);
+                    };
                     img.src = e.target.result;
                 };
                 reader.readAsDataURL(file);
