@@ -163,7 +163,17 @@
             });
         }
 
-        // Extract date from EXIF metadata
+        // Convert file to base64 without compression
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Extract date and time from EXIF metadata
         function getExifDate(file) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -174,12 +184,10 @@
                             EXIF.getData(img, function() {
                                 const dateTime = EXIF.getTag(this, "DateTime") || EXIF.getTag(this, "DateTimeOriginal");
                                 if (dateTime) {
-                                    // EXIF format: "YYYY:MM:DD HH:MM:SS"
-                                    // Convert to "YYYY-MM-DD HH:MM:SS"
+                                    // EXIF format: "YYYY:MM:DD HH:MM:SS" → "YYYY-MM-DD HH:MM:SS"
                                     const formattedDateTime = dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
                                     resolve(formattedDateTime);
                                 } else {
-                                    // No EXIF date, use current date and time
                                     const now = new Date();
                                     const date = now.toISOString().split('T')[0];
                                     const time = now.toTimeString().split(' ')[0];
@@ -422,10 +430,10 @@
                     // Extract date from EXIF metadata
                     const photoDate = await getExifDate(file);
                     
-                    // Compress image
-                    const compressed = await compressImage(file, 1);
+                    // Get original file without compression
+                    const originalBase64 = await fileToBase64(file);
                     
-                    // Save to device (like normal camera behavior)
+                    // Save ORIGINAL to device (no compression)
                     const now = new Date();
                     const treeNumber = treeForm.treeNumber || 'new';
                     const yyyymmdd = now.getFullYear() + 
@@ -435,9 +443,12 @@
                                    String(now.getMinutes()).padStart(2, '0') + 
                                    String(now.getSeconds()).padStart(2, '0');
                     const filename = `${treeNumber} ${yyyymmdd} ${hhmmss}.jpg`;
-                    saveImageToDevice(compressed, filename);
+                    saveImageToDevice(originalBase64, filename);
                     
-                    // Add to form with extracted date
+                    // Compress for in-app storage only
+                    const compressed = await compressImage(file, 1);
+                    
+                    // Add compressed version to form with EXIF date
                     const newPhoto = {
                         id: Date.now().toString() + Math.random(),
                         data: compressed,
@@ -446,7 +457,7 @@
                         isPrimary: treeForm.photos.length === 0
                     };
                     setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
-                    showSave('✅ Photo captured & saved!');
+                    showSave('✅ Original photo saved to device!');
                 }
             }
 
@@ -1276,6 +1287,11 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 <div className="text-center text-sm font-semibold text-gray-700 mb-2">
                                                     Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
                                                 </div>
+                                                {selectedTree.photos[selectedPhotoIndex]?.caption && (
+                                                    <div className="text-center text-sm text-gray-600 mb-3">
+                                                        {selectedTree.photos[selectedPhotoIndex].caption}
+                                                    </div>
+                                                )}
                                                 {selectedTree.photos.length > 1 && (
                                                     <div className="flex items-center gap-2">
                                                         <button 
@@ -1705,6 +1721,11 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                     <div className="text-white text-lg font-semibold mt-4">
                                         Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
                                     </div>
+                                    {selectedTree.photos[selectedPhotoIndex]?.caption && (
+                                        <div className="text-white text-base mt-2">
+                                            {selectedTree.photos[selectedPhotoIndex].caption}
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 {selectedTree.photos.length > 1 && (
