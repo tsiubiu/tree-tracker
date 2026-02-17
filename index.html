@@ -623,45 +623,6 @@
             }
 
             // Import/Export functions
-            // Scan all existing photos and update captions with EXIF date
-            async function scanExistingPhotosDates() {
-                let updatedCount = 0;
-                const updatedTrees = await Promise.all(trees.map(async (tree) => {
-                    if (!tree.photos || tree.photos.length === 0) return tree;
-                    const updatedPhotos = await Promise.all(tree.photos.map(async (photo) => {
-                        if (photo.caption && photo.caption.match(/📷|📁/)) return photo; // already has date
-                        try {
-                            const dateStr = await new Promise((resolve) => {
-                                const img = new Image();
-                                img.onload = () => {
-                                    try {
-                                        EXIF.getData(img, function() {
-                                            const dt = EXIF.getTag(this, "DateTime") || EXIF.getTag(this, "DateTimeOriginal");
-                                            if (dt) {
-                                                resolve(dt.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3'));
-                                            } else {
-                                                resolve(null);
-                                            }
-                                        });
-                                    } catch(e) { resolve(null); }
-                                };
-                                img.onerror = () => resolve(null);
-                                img.src = photo.data;
-                            });
-                            if (dateStr) {
-                                updatedCount++;
-                                return {...photo, caption: `📷 ${dateStr}`};
-                            }
-                        } catch(e) {}
-                        return photo;
-                    }));
-                    return {...tree, photos: updatedPhotos};
-                }));
-                setTrees(updatedTrees);
-                await saveTrees(updatedTrees);
-                showSave(`✅ Updated ${updatedCount} photo dates!`);
-            }
-
             function downloadTemplate() {
                 const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition,Description
 Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good,Mature oak near the fence
@@ -805,6 +766,54 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                 reader.readAsText(file);
             }
 
+            function exportCSV() {
+                var headers = 'Tree Name,Species,Plot Name,Plot ID,Tree Number,Size,Plant Date,Condition,Description,Notes,Photo Count,Photo Dates';
+                var rows = trees.map(function(tree) {
+                    var notes = (tree.notes || []).map(function(n) { return n.text || ''; }).join(' | ');
+                    var photoCount = (tree.photos || []).length;
+                    var photoDates = (tree.photos || []).map(function(p) { return p.caption || ''; }).filter(Boolean).join(' | ');
+                    var cols = [
+                        tree.name || '',
+                        tree.species || '',
+                        tree.plotName || '',
+                        tree.plotId || '',
+                        tree.treeNumber || '',
+                        tree.size || '',
+                        tree.plantDate || '',
+                        tree.condition || '',
+                        (tree.description || '').replace(/,/g, ';'),
+                        notes.replace(/,/g, ';'),
+                        photoCount,
+                        photoDates.replace(/,/g, ';')
+                    ];
+                    return cols.map(function(c) { return '"' + String(c) + '"'; }).join(',');
+                });
+                var csv = [headers].concat(rows).join('\n');
+                var blob = new Blob([csv], { type: 'text/csv' });
+                var url = window.URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'trees-export-' + new Date().toISOString().split('T')[0] + '.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showSave('✅ CSV exported!');
+            }
+
+            async function scanExistingPhotosDates() {
+                var missing = 0;
+                trees.forEach(function(tree) {
+                    (tree.photos || []).forEach(function(photo) {
+                        var hasDate = photo.caption && (photo.caption.indexOf('📷') >= 0 || photo.caption.indexOf('📁') >= 0);
+                        if (!hasDate) missing++;
+                    });
+                });
+                if (missing === 0) {
+                    showSave('✅ All photos already have dates!');
+                } else {
+                    alert('⚠️ ' + missing + ' photo(s) have no date.\n\nEXIF dates cannot be recovered from compressed photos.\n\nTo add dates: Edit a tree → find photos without dates → type the date manually in the caption field (e.g. 📷 2024-02-15 14:30:00)');
+                }
+            }
+
             function exportData() {
                 const data = { trees, plots };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -815,38 +824,6 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                 a.click();
                 window.URL.revokeObjectURL(url);
                 showSave('✅ Backup downloaded!');
-            }
-
-            function exportCSV() {
-                const headers = ['Tree Name','Species','Plot Name','Plot ID','Tree Number','Size','Plant Date','Condition','Description','Notes','Photo Count','Photo Dates'];
-                const rows = trees.map(tree => {
-                    const notes = (tree.notes || []).map(n => n.text).join(' | ');
-                    const photoCount = (tree.photos || []).length;
-                    const photoDates = (tree.photos || []).map(p => p.caption || '').filter(Boolean).join(' | ');
-                    return [
-                        `"${tree.name || ''}"`,
-                        `"${tree.species || ''}"`,
-                        `"${tree.plotName || ''}"`,
-                        `"${tree.plotId || ''}"`,
-                        `"${tree.treeNumber || ''}"`,
-                        `"${tree.size || ''}"`,
-                        `"${tree.plantDate || ''}"`,
-                        `"${tree.condition || ''}"`,
-                        `"${(tree.description || '').replace(/"/g, "'")}"`,
-                        `"${notes.replace(/"/g, "'")}"`,
-                        photoCount,
-                        `"${photoDates.replace(/"/g, "'")}"`
-                    ].join(',');
-                });
-                const csv = [headers.join(','), ...rows].join('\n');
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `trees-export-${new Date().toISOString().split('T')[0]}.csv`;
-                a.click();
-                window.URL.revokeObjectURL(url);
-                showSave('✅ CSV exported!');
             }
 
             function getFilteredTrees() {
@@ -1086,9 +1063,20 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                                     )}
                                                                     <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
                                                                 </div>
+                                                                {!(photo.caption && (photo.caption.indexOf('📷') >= 0 || photo.caption.indexOf('📁') >= 0)) && (
+                                                                    <div className="mt-1 flex items-center gap-1">
+                                                                        <span className="text-xs text-orange-500">⚠️ No date</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            onChange={(e) => { if(e.target.value) updatePhotoCaption(photo.id, '📷 ' + e.target.value); }}
+                                                                            className="text-xs px-1 py-0.5 border rounded flex-1"
+                                                                            title="Set photo date"
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 <input
                                                                     type="text"
-                                                                    placeholder="Caption..."
+                                                                    placeholder="Caption (e.g. 📷 2024-02-15)..."
                                                                     value={photo.caption}
                                                                     onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
                                                                     className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
@@ -1163,7 +1151,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                         </div>
                                                     </div>
                                                     <div className="space-y-1 text-sm text-gray-600 mb-2">
-                                                        <div>📍 {tree.plotName}{tree.plotId && <span className="ml-1 text-xs bg-gray-100 px-1 rounded">ID: {tree.plotId}</span>}</div>
+                                                        <div>📍 {tree.plotName}{tree.plotId ? ' (ID: ' + tree.plotId + ')' : ''}</div>
                                                         <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
                                                         {tree.description && <div className="text-xs italic mt-1 line-clamp-2">{tree.description}</div>}
                                                     </div>
@@ -1188,7 +1176,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                 </div>
                                                 <div className="space-y-1">
                                                     <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">#{tree.treeNumber}</span>
-                                                    <p className="text-xs text-gray-600 truncate">📍 {tree.plotName}{tree.plotId && <span className="ml-1 bg-gray-100 px-1 rounded">ID: {tree.plotId}</span>}</p>
+                                                    <p className="text-xs text-gray-600 truncate">📍 {tree.plotName}{tree.plotId ? ' (ID: ' + tree.plotId + ')' : ''}</p>
                                                     <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
                                                 </div>
                                             </div>
@@ -1206,7 +1194,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                     </div>
                                                     <div className="flex items-center gap-4 text-sm text-gray-600">
                                                         <span className="italic">{tree.species}</span>
-                                                        <span>📍 {tree.plotName}{tree.plotId && <span className="ml-1 text-xs bg-gray-100 px-1 rounded">ID: {tree.plotId}</span>}</span>
+                                                        <span>📍 {tree.plotName}{tree.plotId ? ' (ID: ' + tree.plotId + ')' : ''}</span>
                                                         <span>📅 {new Date(tree.plantDate).toLocaleDateString()}</span>
                                                     </div>
                                                 </div>
@@ -1237,7 +1225,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                         <td className="px-4 py-3">#{tree.treeNumber}</td>
                                                         <td className="px-4 py-3 font-semibold">{tree.name}</td>
                                                         <td className="px-4 py-3 italic">{tree.species}</td>
-                                                        <td className="px-4 py-3">{tree.plotName}{tree.plotId && <span className="ml-1 text-xs bg-gray-100 px-1 rounded">ID: {tree.plotId}</span>}</td>
+                                                        <td className="px-4 py-3">{tree.plotName}{tree.plotId ? ' (ID: ' + tree.plotId + ')' : ''}</td>
                                                         <td className="px-4 py-3 text-sm">{new Date(tree.plantDate).toLocaleDateString()}</td>
                                                         <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span></td>
                                                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -1319,9 +1307,20 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                                                     )}
                                                                     <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
                                                                 </div>
+                                                                {!(photo.caption && (photo.caption.indexOf('📷') >= 0 || photo.caption.indexOf('📁') >= 0)) && (
+                                                                    <div className="mt-1 flex items-center gap-1">
+                                                                        <span className="text-xs text-orange-500">⚠️ No date</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            onChange={(e) => { if(e.target.value) updatePhotoCaption(photo.id, '📷 ' + e.target.value); }}
+                                                                            className="text-xs px-1 py-0.5 border rounded flex-1"
+                                                                            title="Set photo date"
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 <input
                                                                     type="text"
-                                                                    placeholder="Caption..."
+                                                                    placeholder="Caption (e.g. 📷 2024-02-15)..."
                                                                     value={photo.caption}
                                                                     onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
                                                                     className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
