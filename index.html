@@ -252,6 +252,7 @@
             const [showFullscreenPhoto, setShowFullscreenPhoto] = useState(false);
             const [aiAnalysis, setAiAnalysis] = useState(null);
             const [aiLoading, setAiLoading] = useState(false);
+            const [apiKey, setApiKey] = useState(localStorage.getItem('anthropicApiKey') || '');
             
             const [filterPlot, setFilterPlot] = useState('all');
             const [filterCondition, setFilterCondition] = useState('all');
@@ -771,6 +772,11 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
             async function analyzeTreePhoto() {
                 if (!selectedTree || !selectedTree.photos || selectedTree.photos.length === 0) return;
                 
+                if (!apiKey) {
+                    setAiAnalysis('⚠️ API Key Required\n\nPlease add your Anthropic API key in Settings (Help tab).\n\nGet a free API key at: https://console.anthropic.com/');
+                    return;
+                }
+                
                 setAiLoading(true);
                 setAiAnalysis(null);
                 
@@ -781,7 +787,9 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                     const response = await fetch('https://api.anthropic.com/v1/messages', {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
+                            'anthropic-version': '2023-06-01'
                         },
                         body: JSON.stringify({
                             model: 'claude-sonnet-4-20250514',
@@ -836,6 +844,12 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                 setSelectedTree(updatedTree);
                 showSave('✅ Analysis saved to notes!');
                 setAiAnalysis(null);
+            }
+            
+            function saveApiKey(key) {
+                localStorage.setItem('anthropicApiKey', key);
+                setApiKey(key);
+                showSave('✅ API key saved!');
             }
 
             function exportData() {
@@ -1692,6 +1706,28 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                         {currentTab === 'help' && (
                             <div className="bg-white rounded-lg shadow-lg p-6">
                                 <h2 className="text-2xl font-bold mb-4">📖 Quick Guide</h2>
+                                
+                                {/* API Key Settings */}
+                                <div className="mb-6 p-4 bg-purple-50 border-2 border-purple-200 rounded-lg">
+                                    <h3 className="font-bold text-purple-900 mb-2">🤖 AI Analysis Settings</h3>
+                                    <p className="text-sm text-gray-700 mb-3">Add your Anthropic API key to enable AI tree health analysis. Get a free key at: <a href="https://console.anthropic.com/" target="_blank" className="text-blue-600 underline">console.anthropic.com</a></p>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="password" 
+                                            placeholder="sk-ant-..." 
+                                            value={apiKey}
+                                            onChange={(e) => setApiKey(e.target.value)}
+                                            className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                                        />
+                                        <button 
+                                            onClick={() => saveApiKey(apiKey)}
+                                            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+                                        >
+                                            Save Key
+                                        </button>
+                                    </div>
+                                    {apiKey && <p className="text-xs text-green-600 mt-2">✅ API key is set</p>}
+                                </div>
                                 
                                 <div className="grid md:grid-cols-2 gap-6">
                                     <div>
