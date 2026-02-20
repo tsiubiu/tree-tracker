@@ -627,10 +627,10 @@
 
             // Import/Export functions
             function downloadTemplate() {
-                const template = `Tree Name,Species,Plot Name,Tree Number,Size,Plant Date,Condition,Description
-Oak Tree,Red Oak,North Garden,001,large,2024-01-15,good,Mature oak near the fence
-Maple Tree,Sugar Maple,South Plot,002,normal,2024-02-20,medium,Needs pruning in spring
-Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
+                const template = `Tree Name,Species,Plot Name,Plot ID,Tree Number,Size,Plant Date,Condition,Description
+Oak Tree,Red Oak,North Garden,1,001,large,2024-01-15,good,Mature oak near the fence
+Maple Tree,Sugar Maple,South Plot,2,002,normal,2024-02-20,medium,Needs pruning in spring
+Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                 
                 const blob = new Blob([template], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
@@ -659,11 +659,12 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                 name: values[0] || '',
                                 species: values[1] || '',
                                 plotName: values[2] || '',
-                                treeNumber: values[3] || '',
-                                size: values[4] || 'normal',
-                                plantDate: values[5] || '',
-                                condition: values[6] || 'good',
-                                description: values[7] || '',
+                                plotId: values[3] || '',
+                                treeNumber: values[4] || '',
+                                size: values[5] || 'normal',
+                                plantDate: values[6] || '',
+                                condition: values[7] || 'good',
+                                description: values[8] || '',
                                 photo: '',
                                 notes: []
                             };
@@ -977,7 +978,7 @@ Pine Tree,White Pine,East Field,003,small,2023-12-10,good,Recently planted`;
                                         <div className="mb-6 pb-6 border-b">
                                             <h3 className="font-semibold mb-3">📄 CSV Import</h3>
                                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm text-blue-800">
-                                                <strong>CSV Format:</strong> Tree Name, Species, Plot Name, Tree Number, Size, Plant Date, Condition, Description (optional)
+                                                <strong>CSV Format:</strong> Tree Name, Species, Plot Name, Plot ID, Tree Number, Size, Plant Date, Condition, Description (optional)
                                             </div>
                                             <input ref={importCSVRef} type="file" accept=".csv" onChange={handleCSVImport} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
