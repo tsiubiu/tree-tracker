@@ -572,6 +572,36 @@
                 setSelectedTreeId(null);
                 setCurrentView('list');
             }
+            
+            function navigateToPrevTree() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                if (currentIndex > 0) {
+                    viewTreeDetail(sortedTrees[currentIndex - 1].id);
+                }
+            }
+            
+            function navigateToNextTree() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                if (currentIndex < sortedTrees.length - 1) {
+                    viewTreeDetail(sortedTrees[currentIndex + 1].id);
+                }
+            }
+            
+            function getCurrentTreePosition() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                return {
+                    current: currentIndex + 1,
+                    total: sortedTrees.length,
+                    isFirst: currentIndex === 0,
+                    isLast: currentIndex === sortedTrees.length - 1
+                };
+            }
 
             function handleSort(field) {
                 if (sortBy === field) {
@@ -1271,7 +1301,36 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                         {currentTab === 'trees' && currentView === 'detail' && selectedTree && (
                             <div>
                                 <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-                                    <button onClick={backToList} className="text-blue-600 font-semibold">← Back to Trees</button>
+                                    <div className="flex items-center justify-between">
+                                        <button onClick={backToList} className="text-blue-600 font-semibold hover:text-blue-800">← Back to Trees</button>
+                                        
+                                        {(() => {
+                                            const pos = getCurrentTreePosition();
+                                            return (
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-sm text-gray-600">Tree {pos.current} of {pos.total}</span>
+                                                    <div className="flex gap-2">
+                                                        <button 
+                                                            onClick={navigateToPrevTree}
+                                                            disabled={pos.isFirst}
+                                                            className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                                            title="Previous tree"
+                                                        >
+                                                            ← Prev
+                                                        </button>
+                                                        <button 
+                                                            onClick={navigateToNextTree}
+                                                            disabled={pos.isLast}
+                                                            className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                                            title="Next tree"
+                                                        >
+                                                            Next →
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
                                 
                                 {detailViewMode === 'edit' ? (
