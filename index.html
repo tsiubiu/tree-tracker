@@ -478,6 +478,16 @@
                     isPrimary: p.id === photoId
                 }));
                 setTreeForm({...treeForm, photos: updated});
+                
+                // Also save immediately if editing an existing tree
+                if (editId) {
+                    const updatedTree = {...selectedTree, photos: updated};
+                    const updatedTrees = trees.map(t => t.id === editId ? updatedTree : t);
+                    setTrees(updatedTrees);
+                    saveTrees(updatedTrees);
+                    setSelectedTree(updatedTree);
+                    showSave('✅ Primary photo updated!');
+                }
             }
 
             function updatePhotoCaption(photoId, caption) {
@@ -491,6 +501,17 @@
                 if (!tree.photos || tree.photos.length === 0) return null;
                 const primary = tree.photos.find(p => p.isPrimary);
                 return primary ? primary.data : tree.photos[0].data;
+            }
+            
+            function getSortedPhotos(tree) {
+                if (!tree.photos || tree.photos.length === 0) return [];
+                const sorted = [...tree.photos];
+                sorted.sort((a, b) => {
+                    if (a.isPrimary) return -1;
+                    if (b.isPrimary) return 1;
+                    return 0;
+                });
+                return sorted;
             }
 
             async function handlePlotPhoto(e) {
@@ -1423,39 +1444,46 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                                 <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
                                             </div>
                                         </div>
-                                        {selectedTree.photos && selectedTree.photos.length > 0 && (
+                                        {selectedTree.photos && selectedTree.photos.length > 0 && (() => {
+                                            const sortedPhotos = getSortedPhotos(selectedTree);
+                                            return (
                                             <div className="mb-6">
                                                 <img 
-                                                    src={selectedTree.photos[selectedPhotoIndex]?.data || selectedTree.photos[0].data} 
+                                                    src={sortedPhotos[selectedPhotoIndex]?.data || sortedPhotos[0].data} 
                                                     onClick={() => setShowFullscreenPhoto(true)}
                                                     className="w-full max-h-96 object-cover rounded-lg mb-3 cursor-pointer hover:opacity-90" 
                                                 />
                                                 <div className="text-center text-sm font-semibold text-gray-700 mb-2">
-                                                    Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
+                                                    Photo {selectedPhotoIndex + 1} of {sortedPhotos.length}
+                                                    {sortedPhotos[selectedPhotoIndex]?.isPrimary && <span className="ml-2 text-green-600">★ Primary</span>}
                                                 </div>
-                                                {selectedTree.photos[selectedPhotoIndex]?.caption && (
+                                                {sortedPhotos[selectedPhotoIndex]?.caption && (
                                                     <div className="text-center text-sm text-gray-600 mb-3">
-                                                        {selectedTree.photos[selectedPhotoIndex].caption}
+                                                        {sortedPhotos[selectedPhotoIndex].caption}
                                                     </div>
                                                 )}
-                                                {selectedTree.photos.length > 1 && (
+                                                {sortedPhotos.length > 1 && (
                                                     <div className="flex items-center gap-2">
                                                         <button 
-                                                            onClick={() => setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : selectedTree.photos.length - 1)} 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : sortedPhotos.length - 1)} 
                                                             className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
                                                         >←</button>
                                                         <div className="flex-1 flex gap-2 overflow-x-auto">
-                                                            {selectedTree.photos.map((photo, idx) => (
-                                                                <img 
-                                                                    key={photo.id} 
-                                                                    src={photo.data} 
-                                                                    onClick={() => setSelectedPhotoIndex(idx)}
-                                                                    className={`h-16 w-16 object-cover rounded cursor-pointer border-2 ${idx === selectedPhotoIndex ? 'border-green-600' : 'border-gray-300'}`}
-                                                                />
+                                                            {sortedPhotos.map((photo, idx) => (
+                                                                <div key={photo.id} className="relative">
+                                                                    <img 
+                                                                        src={photo.data} 
+                                                                        onClick={() => setSelectedPhotoIndex(idx)}
+                                                                        className={`h-16 w-16 object-cover rounded cursor-pointer border-2 ${idx === selectedPhotoIndex ? 'border-green-600' : 'border-gray-300'}`}
+                                                                    />
+                                                                    {photo.isPrimary && (
+                                                                        <div className="absolute top-0 right-0 bg-green-600 text-white text-xs px-1 rounded-bl">★</div>
+                                                                    )}
+                                                                </div>
                                                             ))}
                                                         </div>
                                                         <button 
-                                                            onClick={() => setSelectedPhotoIndex(prev => prev < selectedTree.photos.length - 1 ? prev + 1 : 0)} 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev < sortedPhotos.length - 1 ? prev + 1 : 0)} 
                                                             className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
                                                         >→</button>
                                                     </div>
@@ -1490,7 +1518,8 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                                     </div>
                                                 )}
                                             </div>
-                                        )}
+                                            );
+                                        })()}
                                         <div className="space-y-2 mb-6">
                                             <div>📍 Plot: {selectedTree.plotName}</div>
                                             <div>📏 Size: {selectedTree.size}</div>
@@ -1889,7 +1918,9 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                         )}
 
                         {/* FULLSCREEN PHOTO VIEWER */}
-                        {showFullscreenPhoto && selectedTree && selectedTree.photos && selectedTree.photos.length > 0 && (
+                        {showFullscreenPhoto && selectedTree && selectedTree.photos && selectedTree.photos.length > 0 && (() => {
+                            const sortedPhotos = getSortedPhotos(selectedTree);
+                            return (
                             <div 
                                 className="fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center"
                                 onClick={() => setShowFullscreenPhoto(false)}
@@ -1899,11 +1930,11 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                     className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-gray-300 z-10"
                                 >×</button>
                                 
-                                {selectedTree.photos.length > 1 && (
+                                {sortedPhotos.length > 1 && (
                                     <button 
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : selectedTree.photos.length - 1);
+                                            setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : sortedPhotos.length - 1);
                                         }}
                                         className="absolute left-4 text-white text-6xl font-bold hover:text-gray-300 z-10"
                                     >‹</button>
@@ -1911,31 +1942,33 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                 
                                 <div className="max-w-full max-h-full p-4 flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
                                     <img 
-                                        src={selectedTree.photos[selectedPhotoIndex]?.data} 
+                                        src={sortedPhotos[selectedPhotoIndex]?.data} 
                                         className="max-w-full max-h-[85vh] object-contain"
                                         alt={`Photo ${selectedPhotoIndex + 1}`}
                                     />
                                     <div className="text-white text-lg font-semibold mt-4">
-                                        Photo {selectedPhotoIndex + 1} of {selectedTree.photos.length}
+                                        Photo {selectedPhotoIndex + 1} of {sortedPhotos.length}
+                                        {sortedPhotos[selectedPhotoIndex]?.isPrimary && <span className="ml-2">★ Primary</span>}
                                     </div>
-                                    {selectedTree.photos[selectedPhotoIndex]?.caption && (
+                                    {sortedPhotos[selectedPhotoIndex]?.caption && (
                                         <div className="text-white text-base mt-2">
-                                            {selectedTree.photos[selectedPhotoIndex].caption}
+                                            {sortedPhotos[selectedPhotoIndex].caption}
                                         </div>
                                     )}
                                 </div>
                                 
-                                {selectedTree.photos.length > 1 && (
+                                {sortedPhotos.length > 1 && (
                                     <button 
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            setSelectedPhotoIndex(prev => prev < selectedTree.photos.length - 1 ? prev + 1 : 0);
+                                            setSelectedPhotoIndex(prev => prev < sortedPhotos.length - 1 ? prev + 1 : 0);
                                         }}
                                         className="absolute right-4 text-white text-6xl font-bold hover:text-gray-300 z-10"
                                     >›</button>
                                 )}
                             </div>
-                        )}
+                            );
+                        })()}
 
                         {/* FOOTER */}
                         <div className="mt-8 bg-white rounded-lg shadow-lg p-4">
