@@ -479,13 +479,23 @@
                 }));
                 setTreeForm({...treeForm, photos: updated});
                 
-                // Also save immediately if editing an existing tree
+                // Save immediately if editing an existing tree
                 if (editId) {
-                    const updatedTree = {...selectedTree, photos: updated};
+                    const updatedTree = {
+                        ...treeForm,
+                        id: editId,
+                        photos: updated,
+                        notes: treeForm.notes || []
+                    };
                     const updatedTrees = trees.map(t => t.id === editId ? updatedTree : t);
                     setTrees(updatedTrees);
                     saveTrees(updatedTrees);
-                    setSelectedTree(updatedTree);
+                    
+                    // Update selectedTree so detail view shows correctly
+                    if (selectedTreeId === editId) {
+                        setSelectedTree(updatedTree);
+                    }
+                    
                     showSave('✅ Primary photo updated!');
                 }
             }
