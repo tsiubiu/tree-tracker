@@ -375,6 +375,12 @@
                 const updated = editId ? trees.map(t => t.id === editId ? newTree : t) : [...trees, newTree];
                 setTrees(updated);
                 await saveTrees(updated);
+                
+                // Update selectedTree so view mode shows the latest data
+                if (editId && selectedTreeId === editId) {
+                    setSelectedTree(newTree);
+                }
+                
                 resetTreeForm();
             }
 
@@ -385,8 +391,14 @@
                 setDetailViewMode('view');
             }
 
-            function editTree(tree) { 
-                setTreeForm({...tree, notes: tree.notes || []}); 
+            function editTree(tree) {
+                // Ensure photos have isPrimary flag
+                const photos = (tree.photos || []).map((p, idx) => ({
+                    ...p,
+                    isPrimary: p.isPrimary !== undefined ? p.isPrimary : idx === 0
+                }));
+                
+                setTreeForm({...tree, photos, notes: tree.notes || []}); 
                 setEditId(tree.id);
                 setSelectedTreeId(tree.id);
                 setCurrentView('detail');
@@ -472,31 +484,51 @@
                 setTreeForm({...treeForm, photos: updated});
             }
 
-            function setPrimaryPhoto(photoId) {
+            async function setPrimaryPhoto(photoId) {
+                console.log('setPrimaryPhoto called with photoId:', photoId);
+                console.log('Current treeForm.photos:', treeForm.photos);
+                console.log('editId:', editId);
+                
+                // Update all photos' isPrimary status
                 const updated = treeForm.photos.map(p => ({
                     ...p,
                     isPrimary: p.id === photoId
                 }));
-                setTreeForm({...treeForm, photos: updated});
+                
+                console.log('Updated photos:', updated);
+                
+                // Create the updated tree
+                const updatedForm = {...treeForm, photos: updated};
+                
+                // Update form state (for edit mode display)
+                setTreeForm(updatedForm);
+                console.log('setTreeForm called with updated photos');
                 
                 // Save immediately if editing an existing tree
                 if (editId) {
                     const updatedTree = {
-                        ...treeForm,
+                        ...updatedForm,
                         id: editId,
-                        photos: updated,
-                        notes: treeForm.notes || []
+                        notes: updatedForm.notes || []
                     };
+                    
+                    console.log('Updating tree in database:', updatedTree.id);
+                    
+                    // Update trees array
                     const updatedTrees = trees.map(t => t.id === editId ? updatedTree : t);
                     setTrees(updatedTrees);
-                    saveTrees(updatedTrees);
                     
-                    // Update selectedTree so detail view shows correctly
+                    // Wait for save to complete
+                    await saveTrees(updatedTrees);
+                    console.log('Save completed');
+                    
+                    // Update selectedTree for view mode
                     if (selectedTreeId === editId) {
                         setSelectedTree(updatedTree);
+                        console.log('selectedTree updated');
                     }
                     
-                    showSave('✅ Primary photo updated!');
+                    showSave('✅ Primary photo saved!');
                 }
             }
 
@@ -1155,11 +1187,11 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                                                 {photo.isPrimary && (
                                                                     <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
                                                                 )}
-                                                                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <div className="absolute top-1 right-1 flex gap-1 ">
                                                                     {!photo.isPrimary && (
-                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded" title="Set as primary">★</button>
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-green-700" title="Click to set as primary photo">★</button>
                                                                     )}
-                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-red-700">×</button>
                                                                 </div>
                                                                 <input
                                                                     type="text"
@@ -1205,7 +1237,7 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                                     <div className="text-white text-xs font-semibold truncate">{tree.name}</div>
                                                     <div className="text-white/80 text-xs truncate">#{tree.treeNumber}</div>
                                                 </div>
-                                                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                <div className="absolute top-1 right-1  flex gap-1" onClick={(e) => e.stopPropagation()}>
                                                     <button onClick={() => editTree(tree)} className="bg-blue-600 text-white p-1 rounded text-xs">✏️</button>
                                                     <button onClick={() => deleteTree(tree.id)} className="bg-red-600 text-white p-1 rounded text-xs">🗑️</button>
                                                 </div>
@@ -1417,11 +1449,11 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                                                                 {photo.isPrimary && (
                                                                     <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
                                                                 )}
-                                                                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <div className="absolute top-1 right-1 flex gap-1 ">
                                                                     {!photo.isPrimary && (
-                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded" title="Set as primary">★</button>
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-green-700" title="Click to set as primary photo">★</button>
                                                                     )}
-                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">×</button>
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-red-700">×</button>
                                                                 </div>
                                                                 <input
                                                                     type="text"
