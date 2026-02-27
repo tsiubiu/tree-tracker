@@ -21,6 +21,11 @@
         .sortable-header { cursor: pointer; user-select: none; }
         .sortable-header:hover { background-color: rgba(255,255,255,0.1); }
     </style>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -233,6 +238,224 @@
             return colors[condition] || 'bg-gray-100 text-gray-800';
         }
 
+
+        // ========================================
+        // FIREBASE CONFIGURATION & SYNC
+        // ========================================
+        
+        // Firebase configuration - USER MUST UPDATE THIS
+        const firebaseConfig = {
+            apiKey: "AIzaSyA5iOwUgP2OaJAwudrWUzPBfCOIjZ0r35A",
+            authDomain: "tree-tracker-8d015.firebaseapp.com",
+            projectId: "tree-tracker-8d015",
+            storageBucket: "tree-tracker-8d015.firebasestorage.app",
+            messagingSenderId: "561898686532",
+            appId: "1:561898686532:web:77d3356f29c956df4d1411"
+        };
+        
+        // Initialize Firebase (only if config is set)
+        let db = null;
+        let storage = null;
+        let firebaseInitialized = false;
+        
+        try {
+            if (firebaseConfig.apiKey !== "YOUR_API_KEY_HERE") {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                storage = firebase.storage();
+                firebaseInitialized = true;
+                console.log('✅ Firebase initialized');
+                
+                // Enable offline persistence
+                db.enablePersistence().catch((err) => {
+                    if (err.code == 'failed-precondition') {
+                        console.warn('Multiple tabs open, persistence can only be enabled in one tab');
+                    } else if (err.code == 'unimplemented') {
+                        console.warn('Browser doesn\'t support persistence');
+                    }
+                });
+            }
+        } catch (error) {
+            console.warn('Firebase not configured:', error.message);
+        }
+        
+        // Sync status
+        let syncStatus = {
+            isSyncing: false,
+            lastSync: null,
+            error: null
+        };
+        
+        // Sync trees to Firebase
+        async function syncTreesToFirebase(treesData) {
+            if (!firebaseInitialized || !navigator.onLine) return false;
+            
+            try {
+                syncStatus.isSyncing = true;
+                
+                // Save trees with timestamp
+                await db.collection('trees').doc('data').set({
+                    trees: treesData,
+                    lastModified: firebase.firestore.FieldValue.serverTimestamp(),
+                    deviceId: getDeviceId()
+                });
+                
+                syncStatus.lastSync = new Date().toISOString();
+                syncStatus.error = null;
+                console.log('✅ Trees synced to Firebase');
+                return true;
+            } catch (error) {
+                console.error('Firebase sync error:', error);
+                syncStatus.error = error.message;
+                return false;
+            } finally {
+                syncStatus.isSyncing = false;
+            }
+        }
+        
+        // Sync plots to Firebase
+        async function syncPlotsToFirebase(plotsData) {
+            if (!firebaseInitialized || !navigator.onLine) return false;
+            
+            try {
+                await db.collection('plots').doc('data').set({
+                    plots: plotsData,
+                    lastModified: firebase.firestore.FieldValue.serverTimestamp(),
+                    deviceId: getDeviceId()
+                });
+                
+                console.log('✅ Plots synced to Firebase');
+                return true;
+            } catch (error) {
+                console.error('Plots sync error:', error);
+                return false;
+            }
+        }
+        
+        // Load trees from Firebase
+        async function loadTreesFromFirebase() {
+            if (!firebaseInitialized || !navigator.onLine) return null;
+            
+            try {
+                const doc = await db.collection('trees').doc('data').get();
+                if (doc.exists) {
+                    const data = doc.data();
+                    console.log('✅ Trees loaded from Firebase');
+                    return data.trees || [];
+                }
+                return null;
+            } catch (error) {
+                console.error('Firebase load error:', error);
+                return null;
+            }
+        }
+        
+        // Load plots from Firebase
+        async function loadPlotsFromFirebase() {
+            if (!firebaseInitialized || !navigator.onLine) return null;
+            
+            try {
+                const doc = await db.collection('plots').doc('data').get();
+                if (doc.exists) {
+                    const data = doc.data();
+                    console.log('✅ Plots loaded from Firebase');
+                    return data.plots || [];
+                }
+                return null;
+            } catch (error) {
+                console.error('Plots load error:', error);
+                return null;
+            }
+        }
+        
+        // Merge trees with conflict resolution (last-write-wins by date)
+        function mergeTrees(localTrees, cloudTrees) {
+            if (!cloudTrees || cloudTrees.length === 0) return localTrees;
+            if (!localTrees || localTrees.length === 0) return cloudTrees;
+            
+            const merged = new Map();
+            
+            // Add all trees to map
+            [...localTrees, ...cloudTrees].forEach(tree => {
+                const existing = merged.get(tree.id);
+                if (!existing) {
+                    merged.set(tree.id, tree);
+                } else {
+                    // Keep newer version based on last modification
+                    const existingDate = existing.lastModified || existing.plantDate || '2000-01-01';
+                    const treeDate = tree.lastModified || tree.plantDate || '2000-01-01';
+                    if (treeDate > existingDate) {
+                        merged.set(tree.id, tree);
+                    }
+                }
+            });
+            
+            return Array.from(merged.values());
+        }
+        
+        // Get unique device ID
+        function getDeviceId() {
+            let deviceId = localStorage.getItem('deviceId');
+            if (!deviceId) {
+                deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('deviceId', deviceId);
+            }
+            return deviceId;
+        }
+        
+        // Full sync (bidirectional)
+        async function performFullSync() {
+            if (!firebaseInitialized || !navigator.onLine) {
+                console.log('⚠️ Sync skipped: Firebase not initialized or offline');
+                return { success: false, reason: 'offline' };
+            }
+            
+            try {
+                syncStatus.isSyncing = true;
+                
+                // Load local data
+                const localTrees = await localforage.getItem('trees') || [];
+                const localPlots = await localforage.getItem('plots') || [];
+                
+                // Load cloud data
+                const cloudTrees = await loadTreesFromFirebase();
+                const cloudPlots = await loadPlotsFromFirebase();
+                
+                // Merge data
+                const mergedTrees = mergeTrees(localTrees, cloudTrees);
+                const mergedPlots = cloudPlots && cloudPlots.length > 0 ? cloudPlots : localPlots;
+                
+                // Save merged data both places
+                await localforage.setItem('trees', mergedTrees);
+                await localforage.setItem('plots', mergedPlots);
+                
+                await syncTreesToFirebase(mergedTrees);
+                await syncPlotsToFirebase(mergedPlots);
+                
+                syncStatus.lastSync = new Date().toISOString();
+                syncStatus.error = null;
+                
+                console.log('✅ Full sync completed');
+                return { success: true, treesCount: mergedTrees.length };
+            } catch (error) {
+                console.error('Sync error:', error);
+                syncStatus.error = error.message;
+                return { success: false, error: error.message };
+            } finally {
+                syncStatus.isSyncing = false;
+            }
+        }
+        
+        // Auto-sync on online event
+        window.addEventListener('online', () => {
+            console.log('📶 Back online - syncing...');
+            performFullSync();
+        });
+        
+        // ========================================
+        // END FIREBASE SYNC
+        // ========================================
+
         function TreeTrackerApp() {
             const [trees, setTrees] = useState([]);
             const [plots, setPlots] = useState([]);
@@ -270,6 +493,11 @@
             });
             const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
             
+            // Firebase sync state
+            const [syncMessage, setSyncMessage] = useState('');
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [lastSyncTime, setLastSyncTime] = useState(null);
+            
             const fileRef = useRef(null);
             const plotPhotoRef = useRef(null);
             const importCSVRef = useRef(null);
@@ -279,6 +507,8 @@
 
             async function loadData() {
                 try {
+                    setLoading(true);
+                    
                     let attempts = 0;
                     while (!storage.ready && attempts < 30) {
                         await new Promise(resolve => setTimeout(resolve, 100));
@@ -289,13 +519,15 @@
                         console.warn('Storage not ready');
                     }
                     
+                    // Load local data first (instant)
                     const td = await storage.get('trees');
                     const pd = await storage.get('plots');
                     
                     // Migrate old photo field to photos array
+                    let localTrees = [];
                     if (td) {
                         const parsedTrees = JSON.parse(td);
-                        const migratedTrees = parsedTrees.map(tree => {
+                        localTrees = parsedTrees.map(tree => {
                             if (tree.photo && !tree.photos) {
                                 return {
                                     ...tree,
@@ -313,23 +545,99 @@
                             if (!tree.plotId) tree.plotId = ''; // Add plotId if missing
                             return tree;
                         });
-                        setTrees(migratedTrees);
-                        if (parsedTrees.some(t => t.photo || !t.plotId)) {
-                            await saveTrees(migratedTrees);
-                        }
                     }
                     
-                    if (pd) setPlots(JSON.parse(pd));
-                } catch (e) { console.error('Load error:', e); }
-                finally { setLoading(false); }
+                    let localPlots = [];
+                    if (pd) localPlots = JSON.parse(pd);
+                    
+                    // Show local data immediately (offline-first)
+                    setTrees(localTrees);
+                    setPlots(localPlots);
+                    
+                    // Try to sync with Firebase in background (if online)
+                    if (firebaseInitialized && navigator.onLine) {
+                        setIsSyncing(true);
+                        setSyncMessage('☁️ Syncing...');
+                        
+                        try {
+                            // Load cloud data
+                            const cloudTrees = await loadTreesFromFirebase();
+                            const cloudPlots = await loadPlotsFromFirebase();
+                            
+                            // Merge with local data
+                            const mergedTrees = mergeTrees(localTrees, cloudTrees);
+                            const mergedPlots = cloudPlots && cloudPlots.length > 0 ? cloudPlots : localPlots;
+                            
+                            // Check if data changed
+                            const treesChanged = JSON.stringify(mergedTrees) !== JSON.stringify(localTrees);
+                            const plotsChanged = JSON.stringify(mergedPlots) !== JSON.stringify(localPlots);
+                            
+                            if (treesChanged || plotsChanged) {
+                                // Update local storage
+                                if (treesChanged) {
+                                    await storage.set('trees', JSON.stringify(mergedTrees));
+                                    setTrees(mergedTrees);
+                                }
+                                if (plotsChanged) {
+                                    await storage.set('plots', JSON.stringify(mergedPlots));
+                                    setPlots(mergedPlots);
+                                }
+                                
+                                // Sync back to cloud
+                                await syncTreesToFirebase(mergedTrees);
+                                await syncPlotsToFirebase(mergedPlots);
+                                
+                                setSyncMessage('✅ Synced from cloud');
+                            } else {
+                                setSyncMessage('✅ Up to date');
+                            }
+                            
+                            setLastSyncTime(new Date().toISOString());
+                        } catch (syncError) {
+                            console.warn('Cloud sync failed:', syncError);
+                            setSyncMessage('⚠️ Offline mode');
+                        } finally {
+                            setIsSyncing(false);
+                            setTimeout(() => setSyncMessage(''), 5000);
+                        }
+                    } else {
+                        setSyncMessage('📱 Offline mode');
+                        setTimeout(() => setSyncMessage(''), 3000);
+                    }
+                    
+                    // Save if migrations occurred
+                    if (localTrees.some(t => t.photo || !t.plotId)) {
+                        await saveTrees(localTrees);
+                    }
+                    
+                } catch (e) { 
+                    console.error('Load error:', e);
+                    setSyncMessage('❌ Load error');
+                    setTimeout(() => setSyncMessage(''), 3000);
+                } finally { 
+                    setLoading(false);
+                }
             }
 
             function showSave(msg) { setSaveMsg(msg); setTimeout(() => setSaveMsg(''), 3000); }
 
             async function saveTrees(data) { 
                 try {
+                    // Always save locally first (instant, offline-first)
                     await storage.set('trees', JSON.stringify(data)); 
                     showSave('✅ Saved!');
+                    
+                    // Sync to Firebase in background (if online)
+                    if (firebaseInitialized && navigator.onLine) {
+                        syncTreesToFirebase(data).then(success => {
+                            if (success) {
+                                setLastSyncTime(new Date().toISOString());
+                                console.log('☁️ Synced to cloud');
+                            }
+                        });
+                    }
+                } catch (error) {
+                    showSave('❌ Storage full! Remove photos.');
                 } catch (error) {
                     showSave('❌ Storage full! Remove photos.');
                     console.error('Save error:', error);
@@ -1017,14 +1325,50 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                             {saveMsg}
                         </div>
                     )}
+                    
+                    {syncMessage && (
+                        <div style={{position: 'fixed', top: '70px', right: '20px', background: syncMessage.includes('✅') ? '#10b981' : syncMessage.includes('⚠️') ? '#f59e0b' : '#3b82f6', color: 'white', padding: '12px 20px', borderRadius: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 9999, fontSize: '14px'}}>
+                            {syncMessage}
+                        </div>
+                    )}
 
                     <div className="max-w-6xl mx-auto">
                         {/* Header */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                            <div className="flex items-center gap-3">
-                                <span className="text-4xl">🫒</span>
-                                <h1 className="text-3xl font-bold">Tree Tracker</h1>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-4xl">🫒</span>
+                                    <h1 className="text-3xl font-bold">Tree Tracker</h1>
+                                </div>
+                                {firebaseInitialized && (
+                                    <button 
+                                        onClick={() => {
+                                            setIsSyncing(true);
+                                            setSyncMessage('☁️ Syncing...');
+                                            performFullSync().then(result => {
+                                                if (result.success) {
+                                                    setSyncMessage(`✅ Synced ${result.treesCount} trees`);
+                                                    loadData();
+                                                } else {
+                                                    setSyncMessage('❌ Sync failed');
+                                                }
+                                                setIsSyncing(false);
+                                                setTimeout(() => setSyncMessage(''), 3000);
+                                            });
+                                        }}
+                                        disabled={isSyncing || !navigator.onLine}
+                                        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                                    >
+                                        {isSyncing ? '⏳ Syncing...' : '☁️ Sync Now'}
+                                    </button>
+                                )}
                             </div>
+                            {lastSyncTime && (
+                                <div className="text-xs text-gray-500 mt-2 text-right">
+                                    Last synced: {new Date(lastSyncTime).toLocaleString()}
+                                </div>
+                            )}
+                        </div>
                             <p className="text-gray-600 mt-2">
                                 {currentTab === 'trees' && currentView === 'list' && (hasActiveFilters ? `Showing ${filteredTrees.length} of ${trees.length} trees` : `Total trees: ${trees.length}`)}
                                 {currentTab === 'trees' && currentView === 'detail' && selectedTree && `${selectedTree.name} - Details`}
@@ -1837,6 +2181,51 @@ Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
                         {currentTab === 'help' && (
                             <div className="bg-white rounded-lg shadow-lg p-6">
                                 <h2 className="text-2xl font-bold mb-4">📖 Quick Guide</h2>
+                                
+                                {/* Firebase Cloud Sync Setup */}
+                                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-6">
+                                    <h3 className="font-bold text-lg mb-2">☁️ Cloud Sync Setup (Optional)</h3>
+                                    <p className="text-sm mb-3">Enable cloud backup and multi-device sync with Firebase. Your app works 100% offline without this - Firebase is optional for cloud backup only.</p>
+                                    
+                                    {firebaseInitialized ? (
+                                        <div className="bg-green-100 border-2 border-green-300 rounded p-3">
+                                            <div className="font-bold text-green-800">✅ Firebase Connected</div>
+                                            <div className="text-sm text-green-700 mt-1">Cloud sync is active. Your data automatically backs up when online.</div>
+                                            {lastSyncTime && (
+                                                <div className="text-xs text-green-600 mt-2">Last synced: {new Date(lastSyncTime).toLocaleString()}</div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="bg-yellow-100 border-2 border-yellow-300 rounded p-3">
+                                                <div className="font-bold text-yellow-800">⚠️ Firebase Not Configured</div>
+                                                <div className="text-sm text-yellow-700 mt-1">App works fine without Firebase. Configure only if you want cloud backup.</div>
+                                            </div>
+                                            
+                                            <div className="text-sm space-y-2">
+                                                <div className="font-bold">Setup Steps (5 minutes):</div>
+                                                <div className="pl-4 space-y-1">
+                                                    <div>1. Go to <a href="https://console.firebase.google.com" target="_blank" className="text-blue-600 underline">console.firebase.google.com</a></div>
+                                                    <div>2. Create new project (free)</div>
+                                                    <div>3. Add web app to project</div>
+                                                    <div>4. Enable Firestore Database (test mode)</div>
+                                                    <div>5. Copy config values</div>
+                                                    <div>6. Edit index.html file around line 244</div>
+                                                    <div>7. Replace firebaseConfig values</div>
+                                                    <div>8. Reload app - sync will activate</div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="text-xs bg-gray-100 p-2 rounded font-mono">
+                                                Find this in code (line ~244):<br/>
+                                                const firebaseConfig = {'{'}<br/>
+                                                &nbsp;&nbsp;apiKey: "YOUR_API_KEY_HERE",<br/>
+                                                &nbsp;&nbsp;// ... replace with your values<br/>
+                                                {'}'};
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 
                                 {/* API Key Settings */}
                                 <div className="mb-6 p-4 bg-purple-50 border-2 border-purple-200 rounded-lg">
