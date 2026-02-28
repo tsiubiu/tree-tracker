@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: monospace;
+            background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
+        }
+        .test-box {
+            background: white;
+            border: 2px solid #10b981;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .warning { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Diagnostic Test</h1>
+    <div id="tests"></div>
+
+    <script>
+        const results = [];
+        
+        function test(name, fn) {
+            try {
+                fn();
+                results.push(`<div class="test-box success">✅ ${name}: PASS</div>`);
+            } catch (error) {
+                results.push(`<div class="test-box error">❌ ${name}: FAIL<br/>${error.message}</div>`);
+            }
+        }
+        
+        // Test 1: Basic JavaScript
+        test('JavaScript Execution', () => {
+            if (!window) throw new Error('Window not available');
+        });
+        
+        // Test 2: React
+        test('React Library', () => {
+            if (typeof React === 'undefined') throw new Error('React not loaded');
+        });
+        
+        // Test 3: ReactDOM
+        test('ReactDOM Library', () => {
+            if (typeof ReactDOM === 'undefined') throw new Error('ReactDOM not loaded');
+        });
+        
+        // Test 4: Firebase
+        test('Firebase Library', () => {
+            if (typeof firebase === 'undefined') throw new Error('Firebase not loaded');
+        });
+        
+        // Test 5: Firebase Config
+        test('Firebase Config', () => {
+            const config = {
+                apiKey: "AIzaSyA5iOwUgP2OaJAwudrWUzPBfCOIjZ0r35A",
+                authDomain: "tree-tracker-8d015.firebaseapp.com",
+                projectId: "tree-tracker-8d015"
+            };
+            if (!config.apiKey) throw new Error('Config missing');
+        });
+        
+        // Test 6: Initialize Firebase
+        test('Firebase Initialization', () => {
+            try {
+                firebase.initializeApp({
+                    apiKey: "AIzaSyA5iOwUgP2OaJAwudrWUzPBfCOIjZ0r35A",
+                    authDomain: "tree-tracker-8d015.firebaseapp.com",
+                    projectId: "tree-tracker-8d015",
+                    storageBucket: "tree-tracker-8d015.firebasestorage.app",
+                    messagingSenderId: "561898686532",
+                    appId: "1:561898686532:web:77d3356f29c956df4d1411"
+                });
+            } catch (e) {
+                if (!e.message.includes('already exists')) throw e;
+            }
+        });
+        
+        // Test 7: Simple React Component
+        test('React Render', () => {
+            const { useState } = React;
+            function TestComponent() {
+                return React.createElement('div', {}, 'React Works!');
+            }
+            const root = document.createElement('div');
+            root.id = 'test-root';
+            document.body.appendChild(root);
+            ReactDOM.render(React.createElement(TestComponent), root);
+        });
+        
+        // Display results
+        document.getElementById('tests').innerHTML = results.join('');
+        
+        // Show console info
+        results.push(`<div class="test-box warning">📋 Check browser console (F12) for more details</div>`);
+        document.getElementById('tests').innerHTML = results.join('');
+    </script>
+    
+    <!-- Load libraries -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</body>
+</html>
