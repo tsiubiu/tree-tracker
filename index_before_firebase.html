@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#6B7F39">
+    <title>Tree Tracker</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon-192.png">
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        #root { min-h-screen; }
+        .sortable-header { cursor: pointer; user-select: none; }
+        .sortable-header:hover { background-color: rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Storage
+        const storage = {
+            dbName: 'TreeTrackerDB',
+            db: null,
+            storageType: 'localStorage',
+            ready: false,
+            init: async function() {
+                return new Promise((resolve) => {
+                    const request = indexedDB.open(this.dbName, 1);
+                    request.onerror = () => { 
+                        console.warn('IndexedDB failed, using localStorage');
+                        this.storageType = 'localStorage';
+                        this.ready = true;
+                        resolve(false); 
+                    };
+                    request.onsuccess = (event) => { 
+                        this.db = event.target.result; 
+                        this.storageType = 'IndexedDB';
+                        this.ready = true;
+                        console.log('Storage initialized: IndexedDB');
+                        resolve(true); 
+                    };
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains('data')) {
+                            db.createObjectStore('data', { keyPath: 'key' });
+                        }
+                    };
+                });
+            },
+            get: async function(key) {
+                try {
+                    if (this.db) {
+                        return new Promise((resolve) => {
+                            const tx = this.db.transaction(['data'], 'readonly');
+                            const req = tx.objectStore('data').get(key);
+                            req.onsuccess = () => resolve(req.result ? req.result.value : null);
+                            req.onerror = () => {
+                                console.warn('IndexedDB get failed, trying localStorage');
+                                resolve(localStorage.getItem(key));
+                            };
+                        });
+                    }
+                    return localStorage.getItem(key);
+                } catch (e) { 
+                    console.error('Storage get error:', e);
+                    return localStorage.getItem(key); 
+                }
+            },
+            set: async function(key, value) {
+                try {
+                    if (this.db) {
+                        return new Promise((resolve, reject) => {
+                            const tx = this.db.transaction(['data'], 'readwrite');
+                            const req = tx.objectStore('data').put({ key, value });
+                            req.onsuccess = () => {
+                                console.log(`Saved to IndexedDB: ${key} (${Math.round(value.length/1024)}KB)`);
+                                resolve(true);
+                            };
+                            req.onerror = (err) => { 
+                                console.warn('IndexedDB set failed, trying localStorage', err);
+                                try {
+                                    localStorage.setItem(key, value);
+                                    console.log(`Saved to localStorage: ${key}`);
+                                    resolve(true);
+                                } catch (quotaError) {
+                                    console.error('Storage quota exceeded:', quotaError);
+                                    reject(new Error('Storage quota exceeded. Try exporting and removing some photos to reduce size.'));
+                                }
+                            };
+                        });
+                    }
+                    // Try localStorage
+                    try {
+                        localStorage.setItem(key, value);
+                        console.log(`Saved to localStorage: ${key} (${Math.round(value.length/1024)}KB)`);
+                        return true;
+                    } catch (quotaError) {
+                        console.error('localStorage quota exceeded:', quotaError);
+                        throw new Error('Storage quota exceeded. Your data is too large. Try removing some photos.');
+                    }
+                } catch (e) { 
+                    console.error('Storage set error:', e);
+                    throw e;
+                }
+            },
+            clear: async function() {
+                try {
+                    if (this.db) {
+                        return new Promise((resolve) => {
+                            const tx = this.db.transaction(['data'], 'readwrite');
+                            const req = tx.objectStore('data').clear();
+                            req.onsuccess = () => resolve(true);
+                            req.onerror = () => { localStorage.clear(); resolve(true); };
+                        });
+                    }
+                    localStorage.clear();
+                    return true;
+                } catch (e) { localStorage.clear(); return true; }
+            }
+        };
+        
+        // Initialize storage immediately
+        (async () => {
+            await storage.init();
+        })();
+
+        // Image compression
+        async function compressImage(file, maxSizeMB = 1) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width, height = img.height;
+                        const maxDim = 1200;
+                        if (width > height && width > maxDim) { height = (height / width) * maxDim; width = maxDim; }
+                        else if (height > maxDim) { width = (width / height) * maxDim; height = maxDim; }
+                        canvas.width = width; canvas.height = height;
+                        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                        let quality = 0.8, result = canvas.toDataURL('image/jpeg', quality);
+                        while (result.length > maxSizeMB * 1024 * 1024 && quality > 0.1) {
+                            quality -= 0.1;
+                            result = canvas.toDataURL('image/jpeg', quality);
+                        }
+                        resolve(result);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Convert file to base64 without compression
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Extract date and time from EXIF metadata
+        function getExifDate(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            EXIF.getData(img, function() {
+                                const dateTime = EXIF.getTag(this, "DateTime") || EXIF.getTag(this, "DateTimeOriginal");
+                                if (dateTime) {
+                                    // EXIF format: "YYYY:MM:DD HH:MM:SS" → "YYYY-MM-DD HH:MM:SS"
+                                    const formattedDateTime = dateTime.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+                                    resolve(formattedDateTime);
+                                } else {
+                                    const now = new Date();
+                                    const date = now.toISOString().split('T')[0];
+                                    const time = now.toTimeString().split(' ')[0];
+                                    resolve(`${date} ${time}`);
+                                }
+                            });
+                        } catch (err) {
+                            const now = new Date();
+                            const date = now.toISOString().split('T')[0];
+                            const time = now.toTimeString().split(' ')[0];
+                            resolve(`${date} ${time}`);
+                        }
+                    };
+                    img.onerror = () => {
+                        const now = new Date();
+                        const date = now.toISOString().split('T')[0];
+                        const time = now.toTimeString().split(' ')[0];
+                        resolve(`${date} ${time}`);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Save image to device
+        function saveImageToDevice(dataUrl, filename) {
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function getConditionColor(condition) {
+            const colors = {
+                'good': 'bg-green-100 text-green-800 border-green-300',
+                'medium': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+                'bad': 'bg-orange-100 text-orange-800 border-orange-300',
+                'RIP': 'bg-red-100 text-red-800 border-red-300'
+            };
+            return colors[condition] || 'bg-gray-100 text-gray-800';
+        }
+
+        function TreeTrackerApp() {
+            const [trees, setTrees] = useState([]);
+            const [plots, setPlots] = useState([]);
+            const [currentTab, setCurrentTab] = useState('dashboard');
+            const [currentView, setCurrentView] = useState('list');
+            const [listViewMode, setListViewMode] = useState('grid'); // 'grid', 'compact', 'list', 'table', 'thumbnails'
+            const [selectedTreeId, setSelectedTreeId] = useState(null);
+            const [detailViewMode, setDetailViewMode] = useState('view'); // 'view' or 'edit'
+            const [showForm, setShowForm] = useState(false);
+            const [showPlotForm, setShowPlotForm] = useState(false);
+            const [showImport, setShowImport] = useState(false);
+            const [editId, setEditId] = useState(null);
+            const [saveMsg, setSaveMsg] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [newNote, setNewNote] = useState('');
+            const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+            const [showFullscreenPhoto, setShowFullscreenPhoto] = useState(false);
+            const [aiAnalysis, setAiAnalysis] = useState(null);
+            const [aiLoading, setAiLoading] = useState(false);
+            const [apiKey, setApiKey] = useState(localStorage.getItem('anthropicApiKey') || '');
+            
+            const [filterPlot, setFilterPlot] = useState('all');
+            const [filterCondition, setFilterCondition] = useState('all');
+            const [filterYear, setFilterYear] = useState('all');
+            const [searchText, setSearchText] = useState('');
+            
+            const [sortBy, setSortBy] = useState('plotId');
+            const [sortDirection, setSortDirection] = useState('asc');
+            const [sortBy2, setSortBy2] = useState('number');
+            const [sortDirection2, setSortDirection2] = useState('asc');
+            
+            const [treeForm, setTreeForm] = useState({
+                name: '', species: '', plotName: '', plotId: '', treeNumber: '',
+                size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []
+            });
+            const [plotForm, setPlotForm] = useState({name: '', photo: '', description: ''});
+            
+            const fileRef = useRef(null);
+            const plotPhotoRef = useRef(null);
+            const importCSVRef = useRef(null);
+            const importJSONRef = useRef(null);
+
+            useEffect(() => { loadData(); }, []);
+
+            async function loadData() {
+                try {
+                    let attempts = 0;
+                    while (!storage.ready && attempts < 30) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    
+                    if (!storage.ready) {
+                        console.warn('Storage not ready');
+                    }
+                    
+                    const td = await storage.get('trees');
+                    const pd = await storage.get('plots');
+                    
+                    // Migrate old photo field to photos array
+                    if (td) {
+                        const parsedTrees = JSON.parse(td);
+                        const migratedTrees = parsedTrees.map(tree => {
+                            if (tree.photo && !tree.photos) {
+                                return {
+                                    ...tree,
+                                    photos: [{ 
+                                        id: Date.now().toString() + Math.random(), 
+                                        data: tree.photo, 
+                                        date: tree.plantDate || new Date().toISOString(),
+                                        caption: '',
+                                        isPrimary: true 
+                                    }],
+                                    photo: undefined
+                                };
+                            }
+                            if (!tree.photos) tree.photos = [];
+                            if (!tree.plotId) tree.plotId = ''; // Add plotId if missing
+                            return tree;
+                        });
+                        setTrees(migratedTrees);
+                        if (parsedTrees.some(t => t.photo || !t.plotId)) {
+                            await saveTrees(migratedTrees);
+                        }
+                    }
+                    
+                    if (pd) setPlots(JSON.parse(pd));
+                } catch (e) { console.error('Load error:', e); }
+                finally { setLoading(false); }
+            }
+
+            function showSave(msg) { setSaveMsg(msg); setTimeout(() => setSaveMsg(''), 3000); }
+
+            async function saveTrees(data) { 
+                try {
+                    await storage.set('trees', JSON.stringify(data)); 
+                    showSave('✅ Saved!');
+                } catch (error) {
+                    showSave('❌ Storage full! Remove photos.');
+                    console.error('Save error:', error);
+                }
+            }
+            async function savePlots(data) { 
+                try {
+                    await storage.set('plots', JSON.stringify(data)); 
+                    showSave('✅ Saved!');
+                } catch (error) {
+                    showSave('❌ Storage full!');
+                    console.error('Save error:', error);
+                }
+            }
+
+            async function clearDatabase() {
+                const confirmed = confirm('⚠️ WARNING: This will DELETE ALL DATA including trees, plots, and notes!\n\nThis action CANNOT be undone.\n\nAre you absolutely sure?');
+                if (!confirmed) return;
+                
+                const doubleCheck = confirm('⚠️ FINAL WARNING!\n\nYou are about to permanently delete:\n- All trees and their photos\n- All plots\n- All notes history\n- All report templates\n\nType OK in the next dialog to confirm.');
+                if (!doubleCheck) return;
+                
+                const finalConfirm = prompt('Type "DELETE ALL" to confirm (case-sensitive):');
+                if (finalConfirm !== 'DELETE ALL') {
+                    alert('Cancelled - database NOT cleared');
+                    return;
+                }
+                
+                await storage.clear();
+                setTrees([]);
+                setPlots([]);
+                setReportTemplates([]);
+                showSave('✅ Database cleared successfully');
+            }
+
+            async function handleTreeSubmit(e) {
+                e.preventDefault();
+                const newTree = { 
+                    id: editId || Date.now().toString(), 
+                    ...treeForm,
+                    notes: treeForm.notes || []
+                };
+                const updated = editId ? trees.map(t => t.id === editId ? newTree : t) : [...trees, newTree];
+                setTrees(updated);
+                await saveTrees(updated);
+                
+                // Update selectedTree so view mode shows the latest data
+                if (editId && selectedTreeId === editId) {
+                    setSelectedTree(newTree);
+                }
+                
+                resetTreeForm();
+            }
+
+            function resetTreeForm() {
+                setTreeForm({name: '', species: '', plotName: '', plotId: '', treeNumber: '', size: 'normal', plantDate: '', condition: 'good', photos: [], description: '', notes: []});
+                setShowForm(false);
+                setEditId(null);
+                setDetailViewMode('view');
+            }
+
+            function editTree(tree) {
+                // Ensure photos have isPrimary flag
+                const photos = (tree.photos || []).map((p, idx) => ({
+                    ...p,
+                    isPrimary: p.isPrimary !== undefined ? p.isPrimary : idx === 0
+                }));
+                
+                setTreeForm({...tree, photos, notes: tree.notes || []}); 
+                setEditId(tree.id);
+                setSelectedTreeId(tree.id);
+                setCurrentView('detail');
+                setDetailViewMode('edit');
+            }
+
+            async function deleteTree(id) {
+                if (confirm('Delete tree?')) {
+                    const updated = trees.filter(t => t.id !== id);
+                    setTrees(updated);
+                    await saveTrees(updated);
+                    if (selectedTreeId === id) {
+                        setSelectedTreeId(null);
+                        setCurrentView('list');
+                    }
+                }
+            }
+
+            async function handlePhoto(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    // Extract date from EXIF metadata
+                    const photoDate = await getExifDate(file);
+                    
+                    // Compress image
+                    const compressed = await compressImage(file, 1);
+                    
+                    // Add to form with extracted date
+                    const newPhoto = {
+                        id: Date.now().toString() + Math.random(),
+                        data: compressed,
+                        date: new Date().toISOString(),
+                        caption: `📁 ${photoDate}`,
+                        isPrimary: treeForm.photos.length === 0
+                    };
+                    setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
+                    showSave('✅ Photo added!');
+                }
+            }
+
+            async function captureFromCamera(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    // Extract date from EXIF metadata
+                    const photoDate = await getExifDate(file);
+                    
+                    // Get original file without compression
+                    const originalBase64 = await fileToBase64(file);
+                    
+                    // Save ORIGINAL to device (no compression)
+                    const now = new Date();
+                    const treeNumber = treeForm.treeNumber || 'new';
+                    const yyyymmdd = now.getFullYear() + 
+                                     String(now.getMonth() + 1).padStart(2, '0') + 
+                                     String(now.getDate()).padStart(2, '0');
+                    const hhmmss = String(now.getHours()).padStart(2, '0') + 
+                                   String(now.getMinutes()).padStart(2, '0') + 
+                                   String(now.getSeconds()).padStart(2, '0');
+                    const filename = `${treeNumber} ${yyyymmdd} ${hhmmss}.jpg`;
+                    saveImageToDevice(originalBase64, filename);
+                    
+                    // Compress for in-app storage only
+                    const compressed = await compressImage(file, 1);
+                    
+                    // Add compressed version to form with EXIF date
+                    const newPhoto = {
+                        id: Date.now().toString() + Math.random(),
+                        data: compressed,
+                        date: new Date().toISOString(),
+                        caption: `📷 ${photoDate}`,
+                        isPrimary: treeForm.photos.length === 0
+                    };
+                    setTreeForm({...treeForm, photos: [...treeForm.photos, newPhoto]});
+                    showSave('✅ Original photo saved to device!');
+                }
+            }
+
+            function removePhoto(photoId) {
+                const updated = treeForm.photos.filter(p => p.id !== photoId);
+                if (updated.length > 0 && !updated.some(p => p.isPrimary)) {
+                    updated[0].isPrimary = true;
+                }
+                setTreeForm({...treeForm, photos: updated});
+            }
+
+            async function setPrimaryPhoto(photoId) {
+                console.log('setPrimaryPhoto called with photoId:', photoId);
+                console.log('Current treeForm.photos:', treeForm.photos);
+                console.log('editId:', editId);
+                
+                // Update all photos' isPrimary status
+                const updated = treeForm.photos.map(p => ({
+                    ...p,
+                    isPrimary: p.id === photoId
+                }));
+                
+                console.log('Updated photos:', updated);
+                
+                // Create the updated tree
+                const updatedForm = {...treeForm, photos: updated};
+                
+                // Update form state (for edit mode display)
+                setTreeForm(updatedForm);
+                console.log('setTreeForm called with updated photos');
+                
+                // Save immediately if editing an existing tree
+                if (editId) {
+                    const updatedTree = {
+                        ...updatedForm,
+                        id: editId,
+                        notes: updatedForm.notes || []
+                    };
+                    
+                    console.log('Updating tree in database:', updatedTree.id);
+                    
+                    // Update trees array
+                    const updatedTrees = trees.map(t => t.id === editId ? updatedTree : t);
+                    setTrees(updatedTrees);
+                    
+                    // Wait for save to complete
+                    await saveTrees(updatedTrees);
+                    console.log('Save completed');
+                    
+                    // Update selectedTree for view mode
+                    if (selectedTreeId === editId) {
+                        setSelectedTree(updatedTree);
+                        console.log('selectedTree updated');
+                    }
+                    
+                    showSave('✅ Primary photo saved!');
+                }
+            }
+
+            function updatePhotoCaption(photoId, caption) {
+                const updated = treeForm.photos.map(p => 
+                    p.id === photoId ? {...p, caption} : p
+                );
+                setTreeForm({...treeForm, photos: updated});
+            }
+
+            function getPrimaryPhoto(tree) {
+                if (!tree.photos || tree.photos.length === 0) return null;
+                const primary = tree.photos.find(p => p.isPrimary);
+                return primary ? primary.data : tree.photos[0].data;
+            }
+            
+            function getSortedPhotos(tree) {
+                if (!tree.photos || tree.photos.length === 0) return [];
+                const sorted = [...tree.photos];
+                sorted.sort((a, b) => {
+                    if (a.isPrimary) return -1;
+                    if (b.isPrimary) return 1;
+                    return 0;
+                });
+                return sorted;
+            }
+
+            async function handlePlotPhoto(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const compressed = await compressImage(file, 1);
+                    setPlotForm({...plotForm, photo: compressed});
+                    showSave('✅ Plot photo ready!');
+                }
+            }
+
+            async function addNote(treeId, noteText) {
+                if (!noteText.trim()) return;
+                
+                const noteEntry = {
+                    id: Date.now().toString(),
+                    text: noteText,
+                    date: new Date().toISOString()
+                };
+                
+                const updated = trees.map(t => {
+                    if (t.id === treeId) {
+                        return {...t, notes: [...(t.notes || []), noteEntry]};
+                    }
+                    return t;
+                });
+                
+                setTrees(updated);
+                await saveTrees(updated);
+                setNewNote('');
+            }
+
+            async function deleteNote(treeId, noteId) {
+                if (confirm('Delete this note?')) {
+                    const updated = trees.map(t => {
+                        if (t.id === treeId) {
+                            return {...t, notes: (t.notes || []).filter(n => n.id !== noteId)};
+                        }
+                        return t;
+                    });
+                    setTrees(updated);
+                    await saveTrees(updated);
+                }
+            }
+
+            async function handlePlotSubmit(e) {
+                e.preventDefault();
+                const newPlot = { id: editId || Date.now().toString(), ...plotForm };
+                const updated = editId ? plots.map(p => p.id === editId ? newPlot : p) : [...plots, newPlot];
+                setPlots(updated);
+                await savePlots(updated);
+                setPlotForm({name: '', photo: '', description: ''});
+                setShowPlotForm(false);
+                setEditId(null);
+            }
+
+            function editPlot(plot) {
+                setPlotForm(plot);
+                setEditId(plot.id);
+                setShowPlotForm(true);
+            }
+
+            async function deletePlot(id) {
+                if (confirm('Delete plot?')) {
+                    const updated = plots.filter(p => p.id !== id);
+                    setPlots(updated);
+                    await savePlots(updated);
+                }
+            }
+
+            function viewTreeDetail(treeId) {
+                setSelectedTreeId(treeId);
+                setCurrentView('detail');
+                setDetailViewMode('view');
+                setSelectedPhotoIndex(0);
+            }
+
+            function backToList() {
+                setSelectedTreeId(null);
+                setCurrentView('list');
+            }
+            
+            function navigateToPrevTree() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                if (currentIndex > 0) {
+                    viewTreeDetail(sortedTrees[currentIndex - 1].id);
+                }
+            }
+            
+            function navigateToNextTree() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                if (currentIndex < sortedTrees.length - 1) {
+                    viewTreeDetail(sortedTrees[currentIndex + 1].id);
+                }
+            }
+            
+            function getCurrentTreePosition() {
+                const filteredTrees = getFilteredTrees();
+                const sortedTrees = getSortedTrees(filteredTrees);
+                const currentIndex = sortedTrees.findIndex(t => t.id === selectedTreeId);
+                return {
+                    current: currentIndex + 1,
+                    total: sortedTrees.length,
+                    isFirst: currentIndex === 0,
+                    isLast: currentIndex === sortedTrees.length - 1
+                };
+            }
+
+            function handleSort(field) {
+                if (sortBy === field) {
+                    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                } else {
+                    setSortBy(field);
+                    setSortDirection('asc');
+                }
+            }
+
+            function getSortIcon(field) {
+                if (sortBy !== field) return '⇅';
+                return sortDirection === 'asc' ? '↑' : '↓';
+            }
+
+            function getCompareValue(tree, sortField) {
+                switch(sortField) {
+                    case 'name': return tree.name.toLowerCase();
+                    case 'number': return tree.treeNumber.toLowerCase();
+                    case 'species': return tree.species.toLowerCase();
+                    case 'plot': return tree.plotName.toLowerCase();
+                    case 'plotId': return tree.plotId || '';
+                    case 'date': return new Date(tree.plantDate);
+                    case 'condition':
+                        const conditionOrder = { 'good': 1, 'medium': 2, 'bad': 3, 'RIP': 4 };
+                        return conditionOrder[tree.condition] || 5;
+                    default: return tree.name.toLowerCase();
+                }
+            }
+
+            function getSortedTrees(treesToSort) {
+                const sorted = [...treesToSort];
+                sorted.sort((a, b) => {
+                    const compareA = getCompareValue(a, sortBy);
+                    const compareB = getCompareValue(b, sortBy);
+                    
+                    let primaryResult = 0;
+                    if (compareA < compareB) primaryResult = sortDirection === 'asc' ? -1 : 1;
+                    else if (compareA > compareB) primaryResult = sortDirection === 'asc' ? 1 : -1;
+                    
+                    if (primaryResult === 0 && sortBy2 !== 'none') {
+                        const compareA2 = getCompareValue(a, sortBy2);
+                        const compareB2 = getCompareValue(b, sortBy2);
+                        
+                        if (compareA2 < compareB2) return sortDirection2 === 'asc' ? -1 : 1;
+                        if (compareA2 > compareB2) return sortDirection2 === 'asc' ? 1 : -1;
+                    }
+                    
+                    return primaryResult;
+                });
+                return sorted;
+            }
+
+            // Import/Export functions
+            function downloadTemplate() {
+                const template = `Tree Name,Species,Plot Name,Plot ID,Tree Number,Size,Plant Date,Condition,Description
+Oak Tree,Red Oak,North Garden,1,001,large,2024-01-15,good,Mature oak near the fence
+Maple Tree,Sugar Maple,South Plot,2,002,normal,2024-02-20,medium,Needs pruning in spring
+Pine Tree,White Pine,East Field,3,003,small,2023-12-10,good,Recently planted`;
+                
+                const blob = new Blob([template], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'tree_template.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+
+            function handleCSVImport(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n').filter(line => line.trim());
+                        const dataLines = lines.slice(1);
+                        
+                        const importedTrees = dataLines.map((line, index) => {
+                            const values = line.split(',').map(v => v.trim());
+                            return {
+                                id: Date.now().toString() + index,
+                                name: values[0] || '',
+                                species: values[1] || '',
+                                plotName: values[2] || '',
+                                plotId: values[3] || '',
+                                treeNumber: values[4] || '',
+                                size: values[5] || 'normal',
+                                plantDate: values[6] || '',
+                                condition: values[7] || 'good',
+                                description: values[8] || '',
+                                photo: '',
+                                notes: []
+                            };
+                        }).filter(tree => tree.name && tree.species);
+
+                        if (importedTrees.length === 0) {
+                            alert('No valid tree data found');
+                            return;
+                        }
+
+                        const updated = [...trees, ...importedTrees];
+                        setTrees(updated);
+                        await saveTrees(updated);
+                        
+                        showSave(`✅ Imported ${importedTrees.length} trees!`);
+                        setShowImport(false);
+                        if (importCSVRef.current) importCSVRef.current.value = '';
+                    } catch (error) {
+                        alert('Error importing CSV file');
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            function handleJSONImport(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        // Wait for storage to be ready
+                        let attempts = 0;
+                        while (!storage.ready && attempts < 30) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            attempts++;
+                        }
+                        
+                        const jsonData = JSON.parse(event.target.result);
+                        
+                        if (!jsonData.trees && !jsonData.plots) {
+                            alert('Invalid backup file format');
+                            return;
+                        }
+
+                        const result = confirm(`Restore ${jsonData.trees?.length || 0} trees and ${jsonData.plots?.length || 0} plots?\n\nOK = REPLACE all data\nCancel = MERGE with existing`);
+                        
+                        if (result) {
+                            // REPLACE mode
+                            if (jsonData.trees) { 
+                                console.log('Importing trees:', jsonData.trees.length);
+                                setTrees(jsonData.trees); 
+                                try {
+                                    await saveTrees(jsonData.trees);
+                                    
+                                    // Verify save
+                                    const verify = await storage.get('trees');
+                                    console.log('Verified saved trees:', verify ? JSON.parse(verify).length : 0);
+                                } catch (error) {
+                                    alert('⚠️ STORAGE FULL!\n\nYour backup has too many photos. Options:\n\n1. Remove photos from some trees\n2. Use desktop/laptop (more storage)\n3. Split into smaller backups\n\nError: ' + error.message);
+                                    setLoading(false);
+                                    return;
+                                }
+                            }
+                            if (jsonData.plots) { 
+                                console.log('Importing plots:', jsonData.plots.length);
+                                setPlots(jsonData.plots); 
+                                try {
+                                    await savePlots(jsonData.plots);
+                                    
+                                    // Verify save
+                                    const verify = await storage.get('plots');
+                                    console.log('Verified saved plots:', verify ? JSON.parse(verify).length : 0);
+                                } catch (error) {
+                                    alert('Error saving plots: ' + error.message);
+                                }
+                            }
+                            showSave('✅ Data imported successfully!');
+                        } else {
+                            // MERGE mode
+                            if (jsonData.trees) {
+                                const merged = [...trees, ...jsonData.trees];
+                                console.log('Merging trees:', merged.length);
+                                setTrees(merged);
+                                await saveTrees(merged);
+                            }
+                            if (jsonData.plots) {
+                                const merged = [...plots, ...jsonData.plots];
+                                console.log('Merging plots:', merged.length);
+                                setPlots(merged);
+                                await savePlots(merged);
+                            }
+                            showSave('✅ Data merged! Refresh to verify.');
+                        }
+                        
+                        setShowImport(false);
+                        if (importJSONRef.current) importJSONRef.current.value = '';
+                    } catch (error) {
+                        console.error('Import error:', error);
+                        alert('Error importing JSON file: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            async function analyzeTreePhoto() {
+                if (!selectedTree || !selectedTree.photos || selectedTree.photos.length === 0) return;
+                
+                if (!apiKey) {
+                    setAiAnalysis('⚠️ API Key Required\n\nPlease add your Anthropic API key in Settings (Help tab).\n\nGet a free API key at: https://console.anthropic.com/');
+                    return;
+                }
+                
+                setAiLoading(true);
+                setAiAnalysis(null);
+                
+                try {
+                    const currentPhoto = selectedTree.photos[selectedPhotoIndex];
+                    const base64Data = currentPhoto.data.split(',')[1];
+                    
+                    const response = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
+                            'anthropic-version': '2023-06-01'
+                        },
+                        body: JSON.stringify({
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 1000,
+                            messages: [{
+                                role: 'user',
+                                content: [
+                                    {
+                                        type: 'image',
+                                        source: {
+                                            type: 'base64',
+                                            media_type: 'image/jpeg',
+                                            data: base64Data
+                                        }
+                                    },
+                                    {
+                                        type: 'text',
+                                        text: 'You are a professional arborist analyzing a tree photo. Provide:\n\n1. CONDITION: Rate as "good", "medium", or "bad"\n2. OBSERVATIONS: What you see (health, diseases, pests, damage, stress)\n3. DIAGNOSIS: Likely issues or concerns\n4. TREATMENT: Specific recommendations\n5. PREVENTION: Long-term care tips\n\nBe concise but specific. Tree species: ' + (selectedTree.species || 'Unknown') + '\nTree name: ' + (selectedTree.name || 'Unknown')
+                                    }
+                                ]
+                            }]
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    const analysis = data.content.map(item => item.type === 'text' ? item.text : '').filter(Boolean).join('\n');
+                    
+                    setAiAnalysis(analysis);
+                } catch (error) {
+                    setAiAnalysis('Error analyzing photo: ' + error.message);
+                }
+                
+                setAiLoading(false);
+            }
+            
+            function saveAiAnalysisToNotes() {
+                if (!aiAnalysis || !selectedTree) return;
+                
+                const updatedTree = {
+                    ...selectedTree,
+                    notes: [...(selectedTree.notes || []), {
+                        id: Date.now().toString(),
+                        text: '🤖 AI Analysis: ' + aiAnalysis,
+                        date: new Date().toISOString()
+                    }]
+                };
+                
+                const updatedTrees = trees.map(t => t.id === selectedTree.id ? updatedTree : t);
+                
+                setTrees(updatedTrees);
+                saveTrees(updatedTrees);
+                setSelectedTree(updatedTree);
+                showSave('✅ Analysis saved to notes!');
+                setAiAnalysis(null);
+            }
+            
+            function saveApiKey(key) {
+                localStorage.setItem('anthropicApiKey', key);
+                setApiKey(key);
+                showSave('✅ API key saved!');
+            }
+
+            function exportData() {
+                const data = { trees, plots };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tree-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showSave('✅ Backup downloaded!');
+            }
+
+            function getFilteredTrees() {
+                let filtered = trees;
+                if (filterPlot !== 'all') filtered = filtered.filter(t => t.plotName === filterPlot);
+                if (filterCondition !== 'all') filtered = filtered.filter(t => t.condition === filterCondition);
+                if (filterYear !== 'all') {
+                    filtered = filtered.filter(t => new Date(t.plantDate).getFullYear().toString() === filterYear);
+                }
+                if (searchText.trim()) {
+                    const search = searchText.toLowerCase();
+                    filtered = filtered.filter(t => 
+                        t.name.toLowerCase().includes(search) ||
+                        t.species.toLowerCase().includes(search) ||
+                        t.treeNumber.toLowerCase().includes(search)
+                    );
+                }
+                return filtered;
+            }
+
+            function clearFilters() {
+                setFilterPlot('all');
+                setFilterCondition('all');
+                setFilterYear('all');
+                setSearchText('');
+            }
+
+            function getPlantYears() {
+                const years = new Set();
+                trees.forEach(t => { if (t.plantDate) years.add(new Date(t.plantDate).getFullYear()); });
+                return Array.from(years).sort((a, b) => b - a);
+            }
+
+            function getSortLabel(field) {
+                const labels = {
+                    'name': 'Name', 'number': 'Number', 'species': 'Species',
+                    'plot': 'Plot', 'date': 'Plant Date', 'condition': 'Condition', 'none': 'None'
+                };
+                return labels[field] || field;
+            }
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-green-50 flex items-center justify-center">
+                        <div className="text-2xl text-green-700">Loading...</div>
+                    </div>
+                );
+            }
+
+            const filteredTrees = getFilteredTrees();
+            const sortedTrees = getSortedTrees(filteredTrees);
+            const hasActiveFilters = filterPlot !== 'all' || filterCondition !== 'all' || filterYear !== 'all' || searchText.trim();
+            const selectedTree = selectedTreeId ? trees.find(t => t.id === selectedTreeId) : null;
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4">
+                    {saveMsg && (
+                        <div style={{position: 'fixed', top: '20px', right: '20px', background: saveMsg.includes('✅') ? '#10b981' : '#ef4444', color: 'white', padding: '15px 25px', borderRadius: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 9999}}>
+                            {saveMsg}
+                        </div>
+                    )}
+
+                    <div className="max-w-6xl mx-auto">
+                        {/* Header */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex items-center gap-3">
+                                <span className="text-4xl">🫒</span>
+                                <h1 className="text-3xl font-bold">Tree Tracker</h1>
+                            </div>
+                            <p className="text-gray-600 mt-2">
+                                {currentTab === 'trees' && currentView === 'list' && (hasActiveFilters ? `Showing ${filteredTrees.length} of ${trees.length} trees` : `Total trees: ${trees.length}`)}
+                                {currentTab === 'trees' && currentView === 'detail' && selectedTree && `${selectedTree.name} - Details`}
+                                {currentTab === 'plots' && `Plots: ${plots.length}`}
+                                {currentTab === 'reports' && `Reports - ${reportData.length} results`}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                💾 Storage: {storage.storageType} • 📸 Photos: Max 1MB {trees.length > 0 && `• 💿 ~${Math.round(JSON.stringify(trees).length / 1024)}KB used`}
+                            </p>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="bg-white rounded-lg shadow-lg p-2 mb-6 flex gap-2">
+                            <button onClick={() => setCurrentTab('dashboard')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'dashboard' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📊 Dashboard</button>
+                            <button onClick={() => {setCurrentTab('trees'); setCurrentView('list');}} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'trees' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>🌳 Trees</button>
+                            <button onClick={() => setCurrentTab('plots')} className={`flex-1 px-6 py-3 rounded-lg font-semibold ${currentTab === 'plots' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>📍 Plots</button>
+                        </div>
+
+                        {/* TREES TAB */}
+                        {currentTab === 'trees' && currentView === 'list' && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+                                    <div className="flex justify-between items-center flex-wrap gap-3">
+                                        <div className="flex gap-2 flex-wrap">
+                                            <button onClick={() => setShowForm(!showForm)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">➕ Add Tree</button>
+                                            <button onClick={downloadTemplate} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">📄 Template</button>
+                                            <button onClick={() => setShowImport(!showImport)} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">📥 Import</button>
+                                            <button onClick={exportData} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">💾 Export</button>
+                                            <button onClick={clearDatabase} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">🗑️ Clear DB</button>
+                                        </div>
+                                        <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                                            <button onClick={() => setListViewMode('grid')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'grid' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Grid">⊞</button>
+                                            <button onClick={() => setListViewMode('thumbnails')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'thumbnails' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Photos">🖼️</button>
+                                            <button onClick={() => setListViewMode('compact')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'compact' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Compact">▦</button>
+                                            <button onClick={() => setListViewMode('list')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'list' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="List">≡</button>
+                                            <button onClick={() => setListViewMode('table')} className={`px-3 py-2 rounded transition-all ${listViewMode === 'table' ? 'bg-white shadow text-green-600 font-semibold' : 'text-gray-600'}`} title="Table">☰</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {showImport && (
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-xl font-bold mb-4">Import Data</h2>
+                                        <div className="mb-6 pb-6 border-b">
+                                            <h3 className="font-semibold mb-3">📄 CSV Import</h3>
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm text-blue-800">
+                                                <strong>CSV Format:</strong> Tree Name, Species, Plot Name, Plot ID, Tree Number, Size, Plant Date, Condition, Description (optional)
+                                            </div>
+                                            <input ref={importCSVRef} type="file" accept=".csv" onChange={handleCSVImport} className="w-full px-3 py-2 border rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-semibold mb-3">💾 JSON Backup</h3>
+                                            <input ref={importJSONRef} type="file" accept=".json" onChange={handleJSONImport} className="w-full px-3 py-2 border rounded-lg" />
+                                        </div>
+                                        <button onClick={() => setShowImport(false)} className="mt-6 bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg">Close</button>
+                                    </div>
+                                )}
+
+                                {/* Filters & Sorting - keeping existing code but simplified for space */}
+                                <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+                                    <h3 className="font-semibold text-gray-700 mb-3">🔍 Filters & Sort</h3>
+                                    <div className="grid md:grid-cols-4 gap-4 mb-4">
+                                        <input type="text" placeholder="Search..." value={searchText} onChange={(e) => setSearchText(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+                                        <select value={filterPlot} onChange={(e) => setFilterPlot(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Plots</option>
+                                            {[...new Set(trees.map(t => t.plotName))].sort().map(plot => <option key={plot} value={plot}>{plot}</option>)}
+                                        </select>
+                                        <select value={filterCondition} onChange={(e) => setFilterCondition(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Conditions</option>
+                                            <option value="good">Good</option>
+                                            <option value="medium">Medium</option>
+                                            <option value="bad">Bad</option>
+                                            <option value="RIP">RIP</option>
+                                        </select>
+                                        <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="all">All Years</option>
+                                            {getPlantYears().map(year => <option key={year} value={year}>{year}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="border-t pt-4 grid md:grid-cols-3 gap-4">
+                                        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="plotId">Sort: Plot ID</option>
+                                            <option value="name">Sort: Name</option>
+                                            <option value="number">Sort: Number</option>
+                                            <option value="species">Sort: Species</option>
+                                            <option value="plot">Sort: Plot</option>
+                                            <option value="date">Sort: Date</option>
+                                            <option value="condition">Sort: Condition</option>
+                                        </select>
+                                        <button onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')} className="bg-gray-100 px-4 py-2 rounded-lg text-sm">
+                                            {sortDirection === 'asc' ? '↑ Asc' : '↓ Desc'}
+                                        </button>
+                                        <select value={sortBy2} onChange={(e) => setSortBy2(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+                                            <option value="none">Then by: None</option>
+                                            <option value="plotId">Then: Plot ID</option>
+                                            <option value="name">Then: Name</option>
+                                            <option value="number">Then: Number</option>
+                                            <option value="species">Then: Species</option>
+                                            <option value="plot">Then: Plot</option>
+                                            <option value="date">Then: Date</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {showForm && (
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-xl font-bold mb-4">{editId ? 'Edit' : 'Add'} Tree</h2>
+                                        <form onSubmit={handleTreeSubmit} className="space-y-4">
+                                            <div className="grid md:grid-cols-2 gap-4">
+                                                <input required placeholder="Tree Name" value={treeForm.name} onChange={e => setTreeForm({...treeForm, name: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
+                                                <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
+                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="very-small">Very Small</option>
+                                                    <option value="small">Small</option>
+                                                    <option value="normal">Normal</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="large">Large</option>
+                                                </select>
+                                                <input required type="date" value={treeForm.plantDate} onChange={e => setTreeForm({...treeForm, plantDate: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.condition} onChange={e => setTreeForm({...treeForm, condition: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="good">Good</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="bad">Bad</option>
+                                                    <option value="RIP">RIP</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                                                <textarea 
+                                                    placeholder="Additional details about this tree..." 
+                                                    value={treeForm.description} 
+                                                    onChange={e => setTreeForm({...treeForm, description: e.target.value})} 
+                                                    className="w-full px-3 py-2 border rounded" 
+                                                    rows="3"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium mb-2">Photos (max 1MB each) - {treeForm.photos.length}/10</label>
+                                                
+                                                <div className="flex gap-2 mb-3">
+                                                    <label className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 text-center">
+                                                        📷 Take Photo
+                                                        <input type="file" accept="image/*" capture="environment" onChange={captureFromCamera} className="hidden" />
+                                                    </label>
+                                                    <label className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-green-700 text-center">
+                                                        🖼️ Upload Photo
+                                                        <input type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
+                                                    </label>
+                                                </div>
+                                                
+                                                {treeForm.photos.length > 0 && (
+                                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                                        {treeForm.photos.map((photo, idx) => (
+                                                            <div key={photo.id} className="relative group">
+                                                                <img src={photo.data} className="w-full h-24 object-cover rounded border-2" style={{borderColor: photo.isPrimary ? '#10b981' : '#e5e7eb'}} />
+                                                                {photo.isPrimary && (
+                                                                    <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
+                                                                )}
+                                                                <div className="absolute top-1 right-1 flex gap-1 ">
+                                                                    {!photo.isPrimary && (
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-green-700" title="Click to set as primary photo">★</button>
+                                                                    )}
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-red-700">×</button>
+                                                                </div>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Caption..."
+                                                                    value={photo.caption}
+                                                                    onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
+                                                                    className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">Save</button>
+                                                <button type="button" onClick={resetTreeForm} className="bg-gray-300 px-6 py-2 rounded">Cancel</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
+                                {/* Tree Views - keeping grid view only for space, rest same logic */}
+                                {sortedTrees.length === 0 ? (
+                                    <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+                                        <div className="text-6xl mb-4">🌳</div>
+                                        <h3 className="text-xl font-semibold text-gray-600">No trees</h3>
+                                    </div>
+                                ) : listViewMode === 'thumbnails' ? (
+                                    <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3">
+                                        {sortedTrees.map(tree => (
+                                            <div key={tree.id} className="relative aspect-square bg-white rounded-lg shadow hover:shadow-lg cursor-pointer overflow-hidden group" onClick={() => viewTreeDetail(tree.id)}>
+                                                {getPrimaryPhoto(tree) ? (
+                                                    <img src={getPrimaryPhoto(tree)} className="w-full h-full object-cover" alt={tree.name} />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center bg-gray-100 text-4xl">🌳</div>
+                                                )}
+                                                {tree.photos && tree.photos.length > 1 && (
+                                                    <div className="absolute top-1 left-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded-full">
+                                                        {tree.photos.length}
+                                                    </div>
+                                                )}
+                                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                                                    <div className="text-white text-xs font-semibold truncate">{tree.name}</div>
+                                                    <div className="text-white/80 text-xs truncate">#{tree.treeNumber}</div>
+                                                </div>
+                                                <div className="absolute top-1 right-1  flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                    <button onClick={() => editTree(tree)} className="bg-blue-600 text-white p-1 rounded text-xs">✏️</button>
+                                                    <button onClick={() => deleteTree(tree.id)} className="bg-red-600 text-white p-1 rounded text-xs">🗑️</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : listViewMode === 'grid' ? (
+                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {sortedTrees.map(tree => (
+                                            <div key={tree.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
+                                                {getPrimaryPhoto(tree) && (
+                                                    <div className="relative">
+                                                        <img src={getPrimaryPhoto(tree)} className="w-full h-48 object-cover" />
+                                                        {tree.photos && tree.photos.length > 1 && (
+                                                            <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full">
+                                                                📸 {tree.photos.length}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                <div className="p-4">
+                                                    <div className="flex justify-between mb-2">
+                                                        <div>
+                                                            <h3 className="font-bold">{tree.name} <span className="text-xs bg-blue-100 px-2 py-1 rounded">#{tree.treeNumber}</span></h3>
+                                                            <p className="text-sm text-gray-600 italic">{tree.species}</p>
+                                                        </div>
+                                                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                            <button onClick={() => editTree(tree)} className="text-blue-600">✏️</button>
+                                                            <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1 text-sm text-gray-600 mb-2">
+                                                        <div>📍 {tree.plotName}</div>
+                                                        <div>📅 {new Date(tree.plantDate).toLocaleDateString()}</div>
+                                                        {tree.description && <div className="text-xs italic mt-1 line-clamp-2">{tree.description}</div>}
+                                                    </div>
+                                                    <div className={`inline-block px-3 py-1 rounded-full text-sm border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : listViewMode === 'compact' ? (
+                                    <div className="grid md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                        {sortedTrees.map(tree => (
+                                            <div key={tree.id} className="bg-white rounded-lg shadow p-3 hover:shadow-lg cursor-pointer" onClick={() => viewTreeDetail(tree.id)}>
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex-1 min-w-0">
+                                                        <h4 className="font-bold text-sm truncate">{tree.name}</h4>
+                                                        <p className="text-xs text-gray-500 truncate">{tree.species}</p>
+                                                    </div>
+                                                    <div className="flex gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
+                                                        <button onClick={() => editTree(tree)} className="text-blue-600 text-xs">✏️</button>
+                                                        <button onClick={() => deleteTree(tree.id)} className="text-red-600 text-xs">🗑️</button>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">#{tree.treeNumber}</span>
+                                                    <p className="text-xs text-gray-600 truncate">📍 {tree.plotName}</p>
+                                                    <div className={`inline-block px-2 py-0.5 rounded-full text-xs border ${getConditionColor(tree.condition)}`}>{tree.condition}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : listViewMode === 'list' ? (
+                                    <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+                                        {sortedTrees.map((tree, idx) => (
+                                            <div key={tree.id} className={`p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer ${idx !== 0 ? 'border-t' : ''}`} onClick={() => viewTreeDetail(tree.id)}>
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3 mb-1">
+                                                        <h3 className="text-lg font-bold">{tree.name}</h3>
+                                                        <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">#{tree.treeNumber}</span>
+                                                        <span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                                                        <span className="italic">{tree.species}</span>
+                                                        <span>📍 {tree.plotName}</span>
+                                                        <span>📅 {new Date(tree.plantDate).toLocaleDateString()}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                                    <button onClick={() => editTree(tree)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded">✏️</button>
+                                                    <button onClick={() => deleteTree(tree.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : listViewMode === 'table' ? (
+                                    <div className="bg-white rounded-lg shadow-lg overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-green-600 text-white">
+                                                <tr>
+                                                    <th onClick={() => handleSort('number')} className="sortable-header px-4 py-3 text-left">Tree # {getSortIcon('number')}</th>
+                                                    <th onClick={() => handleSort('name')} className="sortable-header px-4 py-3 text-left">Name {getSortIcon('name')}</th>
+                                                    <th onClick={() => handleSort('species')} className="sortable-header px-4 py-3 text-left">Species {getSortIcon('species')}</th>
+                                                    <th onClick={() => handleSort('plot')} className="sortable-header px-4 py-3 text-left">Plot {getSortIcon('plot')}</th>
+                                                    <th onClick={() => handleSort('date')} className="sortable-header px-4 py-3 text-left">Date {getSortIcon('date')}</th>
+                                                    <th onClick={() => handleSort('condition')} className="sortable-header px-4 py-3 text-left">Condition {getSortIcon('condition')}</th>
+                                                    <th className="px-4 py-3 text-left">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {sortedTrees.map((tree, idx) => (
+                                                    <tr key={tree.id} className={`${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-green-50 cursor-pointer`} onClick={() => viewTreeDetail(tree.id)}>
+                                                        <td className="px-4 py-3">#{tree.treeNumber}</td>
+                                                        <td className="px-4 py-3 font-semibold">{tree.name}</td>
+                                                        <td className="px-4 py-3 italic">{tree.species}</td>
+                                                        <td className="px-4 py-3">{tree.plotName}</td>
+                                                        <td className="px-4 py-3 text-sm">{new Date(tree.plantDate).toLocaleDateString()}</td>
+                                                        <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border ${getConditionColor(tree.condition)}`}>{tree.condition}</span></td>
+                                                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                            <button onClick={() => editTree(tree)} className="text-blue-600 mr-2">✏️</button>
+                                                            <button onClick={() => deleteTree(tree.id)} className="text-red-600">🗑️</button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : null}
+                            </>
+                        )}
+
+                        {/* TREE DETAIL VIEW */}
+                        {currentTab === 'trees' && currentView === 'detail' && selectedTree && (
+                            <div>
+                                <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+                                    <div className="flex items-center justify-between">
+                                        <button onClick={backToList} className="text-blue-600 font-semibold hover:text-blue-800">← Back to Trees</button>
+                                        
+                                        {(() => {
+                                            const pos = getCurrentTreePosition();
+                                            return (
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-sm text-gray-600">Tree {pos.current} of {pos.total}</span>
+                                                    <div className="flex gap-2">
+                                                        <button 
+                                                            onClick={navigateToPrevTree}
+                                                            disabled={pos.isFirst}
+                                                            className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                                            title="Previous tree"
+                                                        >
+                                                            ← Prev
+                                                        </button>
+                                                        <button 
+                                                            onClick={navigateToNextTree}
+                                                            disabled={pos.isLast}
+                                                            className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                                            title="Next tree"
+                                                        >
+                                                            Next →
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                                
+                                {detailViewMode === 'edit' ? (
+                                    // EDIT MODE
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-2xl font-bold mb-4">Edit Tree</h2>
+                                        <form onSubmit={handleTreeSubmit} className="space-y-4">
+                                            <div className="grid md:grid-cols-2 gap-4">
+                                                <input required placeholder="Tree Name" value={treeForm.name} onChange={e => setTreeForm({...treeForm, name: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Species" value={treeForm.species} onChange={e => setTreeForm({...treeForm, species: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Plot Name" value={treeForm.plotName} onChange={e => setTreeForm({...treeForm, plotName: e.target.value})} className="px-3 py-2 border rounded" list="plotList" />
+                                                <datalist id="plotList">{plots.map(p => <option key={p.id} value={p.name} />)}</datalist>
+                                                <input required placeholder="Plot ID (numeric)" type="number" value={treeForm.plotId} onChange={e => setTreeForm({...treeForm, plotId: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <input required placeholder="Tree Number" value={treeForm.treeNumber} onChange={e => setTreeForm({...treeForm, treeNumber: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.size} onChange={e => setTreeForm({...treeForm, size: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="very-small">Very Small</option>
+                                                    <option value="small">Small</option>
+                                                    <option value="normal">Normal</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="large">Large</option>
+                                                </select>
+                                                <input required type="date" value={treeForm.plantDate} onChange={e => setTreeForm({...treeForm, plantDate: e.target.value})} className="px-3 py-2 border rounded" />
+                                                <select value={treeForm.condition} onChange={e => setTreeForm({...treeForm, condition: e.target.value})} className="px-3 py-2 border rounded">
+                                                    <option value="good">Good</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="bad">Bad</option>
+                                                    <option value="RIP">RIP</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                                                <textarea placeholder="Additional details..." value={treeForm.description} onChange={e => setTreeForm({...treeForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium mb-2">Photos (max 1MB each) - {treeForm.photos.length}/10</label>
+                                                
+                                                <div className="flex gap-2 mb-3">
+                                                    <label className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 text-center">
+                                                        📷 Take Photo
+                                                        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={captureFromCamera} className="hidden" />
+                                                    </label>
+                                                    <label className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-green-700 text-center">
+                                                        🖼️ Upload Photo
+                                                        <input type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
+                                                    </label>
+                                                </div>
+                                                
+                                                {treeForm.photos.length > 0 && (
+                                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                                        {treeForm.photos.map((photo, idx) => (
+                                                            <div key={photo.id} className="relative group">
+                                                                <img src={photo.data} className="w-full h-24 object-cover rounded border-2" style={{borderColor: photo.isPrimary ? '#10b981' : '#e5e7eb'}} />
+                                                                {photo.isPrimary && (
+                                                                    <div className="absolute top-1 left-1 bg-green-600 text-white text-xs px-1 rounded">★</div>
+                                                                )}
+                                                                <div className="absolute top-1 right-1 flex gap-1 ">
+                                                                    {!photo.isPrimary && (
+                                                                        <button type="button" onClick={() => setPrimaryPhoto(photo.id)} className="bg-green-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-green-700" title="Click to set as primary photo">★</button>
+                                                                    )}
+                                                                    <button type="button" onClick={() => removePhoto(photo.id)} className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded shadow-lg hover:bg-red-700">×</button>
+                                                                </div>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Caption..."
+                                                                    value={photo.caption}
+                                                                    onChange={(e) => updatePhotoCaption(photo.id, e.target.value)}
+                                                                    className="w-full text-xs px-1 py-0.5 mt-1 border rounded"
+                                                                />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">💾 Save Changes</button>
+                                                <button type="button" onClick={() => setDetailViewMode('view')} className="bg-gray-300 px-6 py-2 rounded">Cancel</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                ) : (
+                                    // VIEW MODE
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <div className="flex justify-between mb-6">
+                                            <div>
+                                                <h2 className="text-3xl font-bold">{selectedTree.name} <span className="text-lg bg-blue-100 px-3 py-1 rounded-full">#{selectedTree.treeNumber}</span></h2>
+                                                <p className="text-xl italic">{selectedTree.species}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => editTree(selectedTree)} className="bg-blue-600 text-white px-4 py-2 rounded-lg">✏️ Edit</button>
+                                                <button onClick={() => deleteTree(selectedTree.id)} className="bg-red-600 text-white px-4 py-2 rounded-lg">🗑️ Delete</button>
+                                            </div>
+                                        </div>
+                                        {selectedTree.photos && selectedTree.photos.length > 0 && (() => {
+                                            const sortedPhotos = getSortedPhotos(selectedTree);
+                                            return (
+                                            <div className="mb-6">
+                                                <img 
+                                                    src={sortedPhotos[selectedPhotoIndex]?.data || sortedPhotos[0].data} 
+                                                    onClick={() => setShowFullscreenPhoto(true)}
+                                                    className="w-full max-h-96 object-cover rounded-lg mb-3 cursor-pointer hover:opacity-90" 
+                                                />
+                                                <div className="text-center text-sm font-semibold text-gray-700 mb-2">
+                                                    Photo {selectedPhotoIndex + 1} of {sortedPhotos.length}
+                                                    {sortedPhotos[selectedPhotoIndex]?.isPrimary && <span className="ml-2 text-green-600">★ Primary</span>}
+                                                </div>
+                                                {sortedPhotos[selectedPhotoIndex]?.caption && (
+                                                    <div className="text-center text-sm text-gray-600 mb-3">
+                                                        {sortedPhotos[selectedPhotoIndex].caption}
+                                                    </div>
+                                                )}
+                                                {sortedPhotos.length > 1 && (
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : sortedPhotos.length - 1)} 
+                                                            className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
+                                                        >←</button>
+                                                        <div className="flex-1 flex gap-2 overflow-x-auto">
+                                                            {sortedPhotos.map((photo, idx) => (
+                                                                <div key={photo.id} className="relative">
+                                                                    <img 
+                                                                        src={photo.data} 
+                                                                        onClick={() => setSelectedPhotoIndex(idx)}
+                                                                        className={`h-16 w-16 object-cover rounded cursor-pointer border-2 ${idx === selectedPhotoIndex ? 'border-green-600' : 'border-gray-300'}`}
+                                                                    />
+                                                                    {photo.isPrimary && (
+                                                                        <div className="absolute top-0 right-0 bg-green-600 text-white text-xs px-1 rounded-bl">★</div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <button 
+                                                            onClick={() => setSelectedPhotoIndex(prev => prev < sortedPhotos.length - 1 ? prev + 1 : 0)} 
+                                                            className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded"
+                                                        >→</button>
+                                                    </div>
+                                                )}
+                                                
+                                                <div className="mt-4 text-center">
+                                                    <button 
+                                                        onClick={analyzeTreePhoto}
+                                                        disabled={aiLoading}
+                                                        className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                                    >
+                                                        {aiLoading ? '🔄 Analyzing...' : '🤖 Analyze with AI'}
+                                                    </button>
+                                                </div>
+                                                
+                                                {aiAnalysis && (
+                                                    <div className="mt-4 bg-purple-50 border-2 border-purple-200 rounded-lg p-4">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <h3 className="font-bold text-purple-900">🤖 AI Analysis</h3>
+                                                            <button 
+                                                                onClick={() => setAiAnalysis(null)}
+                                                                className="text-gray-500 hover:text-gray-700 text-xl"
+                                                            >×</button>
+                                                        </div>
+                                                        <div className="text-sm text-gray-800 whitespace-pre-wrap mb-3">{aiAnalysis}</div>
+                                                        <button 
+                                                            onClick={saveAiAnalysisToNotes}
+                                                            className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                                                        >
+                                                            💾 Save to Notes
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            );
+                                        })()}
+                                        <div className="space-y-2 mb-6">
+                                            <div>📍 Plot: {selectedTree.plotName}</div>
+                                            <div>📏 Size: {selectedTree.size}</div>
+                                            <div>📅 Planted: {new Date(selectedTree.plantDate).toLocaleDateString()}</div>
+                                            <div>🏥 Condition: <span className={`px-3 py-1 rounded-full text-sm border ${getConditionColor(selectedTree.condition)}`}>{selectedTree.condition}</span></div>
+                                            {selectedTree.description && (
+                                                <div className="mt-4 pt-4 border-t">
+                                                    <div className="font-medium mb-1">📝 Description:</div>
+                                                    <div className="text-gray-700 whitespace-pre-wrap">{selectedTree.description}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4">📝 Notes</h3>
+                                    <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                                        <div className="flex gap-2">
+                                            <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Add note..." className="flex-1 px-3 py-2 border rounded-lg" onKeyPress={(e) => { if (e.key === 'Enter') addNote(selectedTree.id, newNote); }} />
+                                            <button onClick={() => addNote(selectedTree.id, newNote)} className="bg-green-600 text-white px-6 py-2 rounded-lg">Add</button>
+                                        </div>
+                                    </div>
+                                    {(!selectedTree.notes || selectedTree.notes.length === 0) ? (
+                                        <div className="text-center py-8 text-gray-500">No notes yet</div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {[...selectedTree.notes].reverse().map(note => (
+                                                <div key={note.id} className="p-4 bg-gray-50 rounded-lg">
+                                                    <div className="flex justify-between mb-2">
+                                                        <div className="text-sm text-gray-500">📅 {new Date(note.date).toLocaleString()}</div>
+                                                        <button onClick={() => deleteNote(selectedTree.id, note.id)} className="text-red-600 text-sm">🗑️</button>
+                                                    </div>
+                                                    <p>{note.text}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* PLOTS TAB */}
+                        {currentTab === 'plots' && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+                                    <button onClick={() => setShowPlotForm(!showPlotForm)} className="bg-green-600 text-white px-4 py-2 rounded-lg">➕ Add Plot</button>
+                                </div>
+
+                                {showPlotForm && (
+                                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                        <h2 className="text-xl font-bold mb-4">{editId ? 'Edit' : 'Add'} Plot</h2>
+                                        <form onSubmit={handlePlotSubmit} className="space-y-4">
+                                            <input required placeholder="Plot Name" value={plotForm.name} onChange={e => setPlotForm({...plotForm, name: e.target.value})} className="w-full px-3 py-2 border rounded" />
+                                            <textarea placeholder="Description" value={plotForm.description} onChange={e => setPlotForm({...plotForm, description: e.target.value})} className="w-full px-3 py-2 border rounded" rows="3" />
+                                            <div>
+                                                <label className="block text-sm font-medium mb-1">Plot Photo (optional)</label>
+                                                <input ref={plotPhotoRef} type="file" accept="image/*" onChange={handlePlotPhoto} className="w-full px-3 py-2 border rounded" />
+                                                {plotForm.photo && <img src={plotForm.photo} className="mt-2 h-32 rounded object-cover" />}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded">Save</button>
+                                                <button type="button" onClick={() => {setShowPlotForm(false); setEditId(null);}} className="bg-gray-300 px-6 py-2 rounded">Cancel</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
+                                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {plots.map(plot => (
+                                        <div key={plot.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
+                                            {plot.photo && <img src={plot.photo} className="w-full h-48 object-cover" />}
+                                            <div className="p-4">
+                                                <div className="flex justify-between mb-2">
+                                                    <div>
+                                                        <h3 className="text-xl font-bold">{plot.name}</h3>
+                                                        <p className="text-sm text-gray-600">🌳 {trees.filter(t => t.plotName === plot.name).length} trees</p>
+                                                    </div>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={() => editPlot(plot)} className="text-blue-600">✏️</button>
+                                                        <button onClick={() => deletePlot(plot.id)} className="text-red-600">🗑️</button>
+                                                    </div>
+                                                </div>
+                                                {plot.description && <p className="text-sm text-gray-600 mb-3">{plot.description}</p>}
+                                                <button onClick={() => { setCurrentTab('trees'); setFilterPlot(plot.name); }} className="w-full bg-green-600 text-white px-4 py-2 rounded-lg">View Trees →</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* DASHBOARD TAB */}
+                        {currentTab === 'dashboard' && (
+                            <>
+                                {/* Summary Cards */}
+                                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="text-3xl">🌳</div>
+                                            <div className="text-right">
+                                                <div className="text-3xl font-bold text-green-600">{trees.length}</div>
+                                                <div className="text-sm text-gray-600">Total Trees</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="text-3xl">📍</div>
+                                            <div className="text-right">
+                                                <div className="text-3xl font-bold text-blue-600">{plots.length}</div>
+                                                <div className="text-sm text-gray-600">Plots</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="text-3xl">📸</div>
+                                            <div className="text-right">
+                                                <div className="text-3xl font-bold text-purple-600">{trees.reduce((sum, t) => sum + (t.photos?.length || 0), 0)}</div>
+                                                <div className="text-sm text-gray-600">Photos</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="text-3xl">📝</div>
+                                            <div className="text-right">
+                                                <div className="text-3xl font-bold text-orange-600">{trees.reduce((sum, t) => sum + (t.notes?.length || 0), 0)}</div>
+                                                <div className="text-sm text-gray-600">Notes</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Tree Health Overview */}
+                                <div className="grid md:grid-cols-2 gap-6 mb-6">
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <h3 className="text-xl font-bold mb-4">🏥 Tree Health</h3>
+                                        <div className="space-y-3">
+                                            {['good', 'medium', 'bad', 'RIP'].map(condition => {
+                                                const count = trees.filter(t => t.condition === condition).length;
+                                                const percentage = trees.length > 0 ? Math.round((count / trees.length) * 100) : 0;
+                                                return (
+                                                    <div key={condition} className="cursor-pointer hover:bg-gray-50 p-2 rounded" onClick={() => { setCurrentTab('trees'); setFilterCondition(condition); }}>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className={`px-3 py-1 rounded-full text-sm border font-semibold ${getConditionColor(condition)}`}>
+                                                                {condition}
+                                                            </span>
+                                                            <span className="text-lg font-bold">{count}</span>
+                                                        </div>
+                                                        <div className="w-full bg-gray-200 rounded-full h-2">
+                                                            <div className={`h-2 rounded-full ${condition === 'good' ? 'bg-green-600' : condition === 'medium' ? 'bg-yellow-600' : condition === 'bad' ? 'bg-orange-600' : 'bg-red-600'}`} style={{width: `${percentage}%`}}></div>
+                                                        </div>
+                                                        <div className="text-xs text-gray-500 mt-1">{percentage}% of total</div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <h3 className="text-xl font-bold mb-4">📊 Trees by Plot</h3>
+                                        <div className="space-y-3 max-h-64 overflow-y-auto">
+                                            {[...new Set(trees.map(t => t.plotName))].sort().map(plotName => {
+                                                const count = trees.filter(t => t.plotName === plotName).length;
+                                                const percentage = trees.length > 0 ? Math.round((count / trees.length) * 100) : 0;
+                                                return (
+                                                    <div key={plotName} className="cursor-pointer hover:bg-gray-50 p-2 rounded" onClick={() => { setCurrentTab('trees'); setFilterPlot(plotName); }}>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className="font-medium truncate">{plotName}</span>
+                                                            <span className="text-lg font-bold ml-2">{count}</span>
+                                                        </div>
+                                                        <div className="w-full bg-gray-200 rounded-full h-2">
+                                                            <div className="bg-blue-600 h-2 rounded-full" style={{width: `${percentage}%`}}></div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Recent Activity & Quick Stats */}
+                                <div className="grid md:grid-cols-2 gap-6 mb-6">
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <h3 className="text-xl font-bold mb-4">📅 Planting Timeline</h3>
+                                        <div className="space-y-2">
+                                            {(() => {
+                                                const currentYear = new Date().getFullYear();
+                                                const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+                                                return years.map(year => {
+                                                    const count = trees.filter(t => new Date(t.plantDate).getFullYear() === year).length;
+                                                    return count > 0 ? (
+                                                        <div key={year} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer" onClick={() => { setCurrentTab('trees'); setFilterYear(year.toString()); }}>
+                                                            <span className="font-medium">{year}</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-32 bg-gray-200 rounded-full h-2">
+                                                                    <div className="bg-green-600 h-2 rounded-full" style={{width: `${Math.min((count / trees.length) * 100, 100)}%`}}></div>
+                                                                </div>
+                                                                <span className="font-bold w-8 text-right">{count}</span>
+                                                            </div>
+                                                        </div>
+                                                    ) : null;
+                                                });
+                                            })()}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg shadow-lg p-6">
+                                        <h3 className="text-xl font-bold mb-4">🔍 Quick Insights</h3>
+                                        <div className="space-y-3">
+                                            <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                                                <div className="font-semibold text-green-800">Most Common Species</div>
+                                                <div className="text-2xl font-bold text-green-600">
+                                                    {(() => {
+                                                        const species = trees.map(t => t.species);
+                                                        const counts = {};
+                                                        species.forEach(s => counts[s] = (counts[s] || 0) + 1);
+                                                        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+                                                        return top ? `${top[0]} (${top[1]})` : 'N/A';
+                                                    })()}
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100" onClick={() => { setCurrentTab('trees'); setFilterCondition('bad'); }}>
+                                                <div className="font-semibold text-yellow-800">Need Attention</div>
+                                                <div className="text-2xl font-bold text-yellow-600">
+                                                    {trees.filter(t => t.condition === 'bad' || t.condition === 'RIP').length} trees
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                                <div className="font-semibold text-blue-800">Trees with Photos</div>
+                                                <div className="text-2xl font-bold text-blue-600">
+                                                    {trees.filter(t => t.photos && t.photos.length > 0).length} / {trees.length}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Recent Notes */}
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <h3 className="text-xl font-bold mb-4">📝 Recent Activity</h3>
+                                    <div className="space-y-3">
+                                        {(() => {
+                                            const allNotes = trees.flatMap(tree => 
+                                                (tree.notes || []).map(note => ({...note, treeName: tree.name, treeId: tree.id}))
+                                            ).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
+                                            
+                                            return allNotes.length > 0 ? allNotes.map(note => (
+                                                <div key={note.id} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer" onClick={() => viewTreeDetail(note.treeId)}>
+                                                    <div className="flex items-start justify-between mb-1">
+                                                        <span className="font-semibold text-green-600">{note.treeName}</span>
+                                                        <span className="text-xs text-gray-500">{new Date(note.date).toLocaleDateString()}</span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-700">{note.text}</p>
+                                                </div>
+                                            )) : (
+                                                <div className="text-center py-8 text-gray-500">No notes yet. Start adding notes to your trees!</div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* HELP TAB */}
+                        {currentTab === 'help' && (
+                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                <h2 className="text-2xl font-bold mb-4">📖 Quick Guide</h2>
+                                
+                                {/* API Key Settings */}
+                                <div className="mb-6 p-4 bg-purple-50 border-2 border-purple-200 rounded-lg">
+                                    <h3 className="font-bold text-purple-900 mb-2">🤖 AI Analysis Settings</h3>
+                                    <p className="text-sm text-gray-700 mb-3">Add your Anthropic API key to enable AI tree health analysis. Get a free key at: <a href="https://console.anthropic.com/" target="_blank" className="text-blue-600 underline">console.anthropic.com</a></p>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="password" 
+                                            placeholder="sk-ant-..." 
+                                            value={apiKey}
+                                            onChange={(e) => setApiKey(e.target.value)}
+                                            className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                                        />
+                                        <button 
+                                            onClick={() => saveApiKey(apiKey)}
+                                            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+                                        >
+                                            Save Key
+                                        </button>
+                                    </div>
+                                    {apiKey && <p className="text-xs text-green-600 mt-2">✅ API key is set</p>}
+                                </div>
+                                
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">🌳 Trees</h3>
+                                        <p className="text-sm text-gray-700">➕ Add trees with photos (auto-compressed to 1MB) • 📸 Use camera or upload • 🔍 Filter & 2-level sort • 📝 Click tree to add notes • 4 view modes</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📍 Plots</h3>
+                                        <p className="text-sm text-gray-700">Create plots with photos • Organize trees by location • Click "View Trees" to filter</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📊 Dashboard</h3>
+                                        <p className="text-sm text-gray-700">Overview stats • Health breakdown • Click cards to filter trees • Recent activity feed</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">💾 Backup</h3>
+                                        <p className="text-sm text-gray-700">💾 Export JSON for full backup • 📄 CSV for bulk import • Works offline • Sync via export/import</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">📸 Photos</h3>
+                                        <p className="text-sm text-gray-700">Up to 10 photos per tree • 📷 Take with camera • Set primary photo • Add captions • Swipe gallery</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h3 className="font-bold text-green-700 mb-2">💡 Tips</h3>
+                                        <p className="text-sm text-gray-700">Export weekly • Use Plot ID for organization • Default sort: Plot ID → Tree# • Add notes regularly</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ABOUT TAB */}
+                        {currentTab === 'about' && (
+                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                <div className="text-center mb-8">
+                                    <div className="text-6xl mb-4">🫒</div>
+                                    <h2 className="text-3xl font-bold mb-2">Tree Tracker</h2>
+                                    <p className="text-gray-600">Professional Tree Management System</p>
+                                </div>
+
+                                <div className="max-w-2xl mx-auto space-y-6">
+                                    <section className="border-t pt-6">
+                                        <h3 className="text-xl font-bold text-green-700 mb-3">👨‍💻 Developer</h3>
+                                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-lg border-l-4 border-green-600">
+                                            <p className="text-2xl font-bold text-gray-800 mb-2">Thanasis-Claude</p>
+                                            <p className="text-gray-600">Built with React, Tailwind CSS & IndexedDB</p>
+                                        </div>
+                                    </section>
+
+                                    <section className="border-t pt-6">
+                                        <h3 className="text-xl font-bold text-green-700 mb-3">✨ Features</h3>
+                                        <div className="grid md:grid-cols-2 gap-3">
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Unlimited trees & plots</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Photo management (1MB)</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Notes with timestamps</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Advanced filtering</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>4 view modes</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Custom reports</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>CSV & JSON export</span></div>
+                                            <div className="flex items-start gap-2"><span className="text-green-600">✓</span><span>Works offline (PWA)</span></div>
+                                        </div>
+                                    </section>
+
+                                    <section className="border-t pt-6">
+                                        <h3 className="text-xl font-bold text-green-700 mb-3">🔧 Technology</h3>
+                                        <div className="space-y-2 text-gray-700">
+                                            <div><strong>Frontend:</strong> React 18 + Tailwind CSS</div>
+                                            <div><strong>Storage:</strong> IndexedDB with localStorage fallback</div>
+                                            <div><strong>Images:</strong> Base64 with auto-compression</div>
+                                            <div><strong>Type:</strong> Progressive Web App (PWA)</div>
+                                        </div>
+                                    </section>
+
+                                    <section className="border-t pt-6">
+                                        <h3 className="text-xl font-bold text-green-700 mb-3">📝 Version</h3>
+                                        <p className="text-gray-700">Version 4.0 - February 2026</p>
+                                        <p className="text-sm text-gray-500 mt-2">
+                                            Complete tree management with advanced reporting and professional data management.
+                                        </p>
+                                    </section>
+
+                                    <section className="border-t pt-6">
+                                        <h3 className="text-xl font-bold text-green-700 mb-3">💚 Acknowledgments</h3>
+                                        <p className="text-gray-700">
+                                            Built for tree enthusiasts, farmers, and anyone managing trees professionally. 
+                                            Thank you for using Tree Tracker!
+                                        </p>
+                                    </section>
+
+                                    <div className="text-center pt-6 border-t">
+                                        <p className="text-gray-500 text-sm">© 2026 Thanasis-Claude • All Rights Reserved</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* FULLSCREEN PHOTO VIEWER */}
+                        {showFullscreenPhoto && selectedTree && selectedTree.photos && selectedTree.photos.length > 0 && (() => {
+                            const sortedPhotos = getSortedPhotos(selectedTree);
+                            return (
+                            <div 
+                                className="fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center"
+                                onClick={() => setShowFullscreenPhoto(false)}
+                            >
+                                <button 
+                                    onClick={() => setShowFullscreenPhoto(false)}
+                                    className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-gray-300 z-10"
+                                >×</button>
+                                
+                                {sortedPhotos.length > 1 && (
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedPhotoIndex(prev => prev > 0 ? prev - 1 : sortedPhotos.length - 1);
+                                        }}
+                                        className="absolute left-4 text-white text-6xl font-bold hover:text-gray-300 z-10"
+                                    >‹</button>
+                                )}
+                                
+                                <div className="max-w-full max-h-full p-4 flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+                                    <img 
+                                        src={sortedPhotos[selectedPhotoIndex]?.data} 
+                                        className="max-w-full max-h-[85vh] object-contain"
+                                        alt={`Photo ${selectedPhotoIndex + 1}`}
+                                    />
+                                    <div className="text-white text-lg font-semibold mt-4">
+                                        Photo {selectedPhotoIndex + 1} of {sortedPhotos.length}
+                                        {sortedPhotos[selectedPhotoIndex]?.isPrimary && <span className="ml-2">★ Primary</span>}
+                                    </div>
+                                    {sortedPhotos[selectedPhotoIndex]?.caption && (
+                                        <div className="text-white text-base mt-2">
+                                            {sortedPhotos[selectedPhotoIndex].caption}
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {sortedPhotos.length > 1 && (
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedPhotoIndex(prev => prev < sortedPhotos.length - 1 ? prev + 1 : 0);
+                                        }}
+                                        className="absolute right-4 text-white text-6xl font-bold hover:text-gray-300 z-10"
+                                    >›</button>
+                                )}
+                            </div>
+                            );
+                        })()}
+
+                        {/* FOOTER */}
+                        <div className="mt-8 bg-white rounded-lg shadow-lg p-4">
+                            <div className="flex justify-center items-center gap-6 text-sm">
+                                <button onClick={() => setCurrentTab('help')} className="text-blue-600 hover:text-blue-800 font-medium">❓ Help</button>
+                                <span className="text-gray-300">|</span>
+                                <button onClick={() => setCurrentTab('about')} className="text-blue-600 hover:text-blue-800 font-medium">ℹ️ About</button>
+                                <span className="text-gray-300">|</span>
+                                <span className="text-gray-600">© 2026 Thanasis-Claude</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<TreeTrackerApp />, document.getElementById('root'));
+    </script>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
