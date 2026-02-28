@@ -255,14 +255,14 @@
         
         // Initialize Firebase (only if config is set)
         let db = null;
-        let storage = null;
+        let firebaseStorage = null;
         let firebaseInitialized = false;
         
         try {
             if (firebaseConfig.apiKey !== "YOUR_API_KEY_HERE") {
                 firebase.initializeApp(firebaseConfig);
                 db = firebase.firestore();
-                storage = firebase.storage();
+                firebaseStorage = firebase.storage();
                 firebaseInitialized = true;
                 console.log('✅ Firebase initialized');
                 
@@ -414,8 +414,10 @@
                 syncStatus.isSyncing = true;
                 
                 // Load local data
-                const localTrees = await localforage.getItem('trees') || [];
-                const localPlots = await localforage.getItem('plots') || [];
+                const localTreesData = await storage.get('trees');
+                const localPlotsData = await storage.get('plots');
+                const localTrees = localTreesData ? JSON.parse(localTreesData) : [];
+                const localPlots = localPlotsData ? JSON.parse(localPlotsData) : [];
                 
                 // Load cloud data
                 const cloudTrees = await loadTreesFromFirebase();
@@ -426,8 +428,8 @@
                 const mergedPlots = cloudPlots && cloudPlots.length > 0 ? cloudPlots : localPlots;
                 
                 // Save merged data both places
-                await localforage.setItem('trees', mergedTrees);
-                await localforage.setItem('plots', mergedPlots);
+                await storage.set('trees', JSON.stringify(mergedTrees));
+                await storage.set('plots', JSON.stringify(mergedPlots));
                 
                 await syncTreesToFirebase(mergedTrees);
                 await syncPlotsToFirebase(mergedPlots);
